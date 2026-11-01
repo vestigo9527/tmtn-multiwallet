@@ -189,14 +189,14 @@ scripts/             只读的辅助脚本（耗时报表、测试网信息、�
 
 ### 1. 让 AI 帮你搭起来
 
-把下面这段交给你的 AI 助手执行（登录币安钱包那一步必须你demo2.ai在手机上确认）：
+把下面这段交给你的 AI 助手执行（登录币安钱包那一步必须你本人在手机上确认）：
 
 ```bash
 git clone <本仓库地址> tmtn && cd tmtn
 npm install
 cp .env.example .env            # 需要的话在 .env 里填 NODEREAL_RPC 等；key 只放这里
 npm i -g @binance/agentic-wallet
-baw auth signin                 # 终端会给出链接 / 二维码，由你demo2.ai在币安 App 里确认
+baw auth signin                 # 终端会给出链接 / 二维码，由你本人在币安 App 里确认
 npx skills add binance/binance-skills-hub --skill binance-agentic-wallet   # 交易 Four 专属模板需要
 npm run sim:8787                # 先用模拟盘跑通：http://127.0.0.1:8787
 npm run live:8788               # 确认没问题后再开实盘：http://127.0.0.1:8788

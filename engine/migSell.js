@@ -1,5 +1,5 @@
 // 迁移即清仓：盯一个币，它从内盘迁移（毕业）到外盘的那一刻，按设定从选中的钱包各卖出 N%（默认 80%，剩下的留作 moonbag）。
-// 规则只能demo2.ai用 scripts/mig-sell.mjs 打开（新建时默认关闭）；随时可暂停 / 取消；存在 data/mig-sell.json，重启后继续盯。
+// 规则只能本人用 scripts/mig-sell.mjs 打开（新建时默认关闭）；随时可暂停 / 取消；存在 data/mig-sell.json，重启后继续盯。
 // 判断迁移：行情的 migrate 事件 + 每 1.5 秒链上确认一次（trader.checkMigrated：Gang 看曲线 graduated，Flap 看 Portal 状态，其他看 PancakeSwap V2 池子）。
 // 卖出走和页面手动卖出一样的 placeOrder（每个钱包卖自己持仓的 N%，钱包 2 转给它自己的后端），来源「迁移清仓」。
 // 失败最多再试 3 次（3 / 8 / 20 秒后）；已提交但结果未知的不重下，避免重复卖。
@@ -53,7 +53,7 @@ export class MigSell extends EventEmitter {
     }
     Object.assign(r, { symbol: t?.symbol && t.symbol !== '?' ? t.symbol : r.symbol || '?', platform: t?.platform || r.platform || '', source: t?.source || r.source || '', quote: t?.quote || r.quote || '' });
     this.rules[k] = r; this.save();
-    // 打开时已经迁移了：不自动卖，提示demo2.ai自己决定（避免误开就把币卖掉）
+    // 打开时已经迁移了：不自动卖，提示本人自己决定（避免误开就把币卖掉）
     if (r.armed && this.migrated(t) && r.state.phase === 'watching') { r.armed = false; this.log(r, '这个币已经在外盘了，规则不会触发；要卖请手动卖出'); this.save(); }
     return this.view();
   }

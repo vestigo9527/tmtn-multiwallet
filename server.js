@@ -308,7 +308,7 @@ if (LIVE && WALLET_SLOT === 1) {
   tracker.on('reload', () => broadcast({ type: 'trackReload' }));   // 历史回补完成：页面重新拉追踪数据
   setTimeout(() => tracker.backfillPending(), 20_000);   // 启动后补一次还没回补过的追踪地址（最近 24 小时，只写历史，不跟单）
 }
-// ---------- Gang 新盘狙击（只在实盘主后端；默认关闭 + 模拟，demo2.ai在顶栏「狙击」模块里打开）----------
+// ---------- Gang 新盘狙击（只在实盘主后端；默认关闭 + 模拟，本人在顶栏「狙击」模块里打开）----------
 let sniper = null;
 if (LIVE && WALLET_SLOT === 1) {
   const { Sniper } = await import('./engine/live/sniper.js');
@@ -682,7 +682,7 @@ app.post('/api/token-rules', (req, res) => {
     res.json(trader.setRule(req.body.token, patch));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-// 迁移即清仓（engine/migSell.js）：只在主后端（钱包 1）或模拟盘跑；新建默认关闭，demo2.ai用 scripts/mig-sell.mjs 打开（没有页面）
+// 迁移即清仓（engine/migSell.js）：只在主后端（钱包 1）或模拟盘跑；新建默认关闭，本人用 scripts/mig-sell.mjs 打开（没有页面）
 let migSell = null;
 if (!LIVE || WALLET_SLOT === 1) {
   const { MigSell } = await import('./engine/migSell.js');

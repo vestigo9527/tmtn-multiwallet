@@ -1,4 +1,4 @@
-// 主题切换：<html data-theme="…">，demo8.ai色在 theme.css 里覆盖 CSS 变量；选择记在 localStorage.tmtnTheme
+// 主题切换：<html data-theme="…">，颜色在 theme.css 里覆盖 CSS 变量；选择记在 localStorage.tmtnTheme
 // 普通 <script>（不是 module），放在 <head> 里、style.css 之后同步执行，刷新时不会先闪一下别的主题
 (() => {
   const THEMES = [

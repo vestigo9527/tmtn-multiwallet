@@ -3,7 +3,7 @@
 // - 报价币（BNCB / GANG / 币股…）授权给 Flap Portal / Gang V2 pad：约等于 2 × 单笔上限的 BNB 价值（0.5 BNB 上限 → 约 1 BNB）
 // - 卖出 meme 代币授权给各平台合约：当前全部余额 × 1.01（向上取整）
 // - 至少不小于本次需要的数量；设置里关掉「预先授权」就回到「只授权本次数量」
-// - 每次授权记到 data/approvals.json，页面「授权管理」据此读链上额度、提供「撤销」（approve 0，只在demo2.ai点击时发送）
+// - 每次授权记到 data/approvals.json，页面「授权管理」据此读链上额度、提供「撤销」（approve 0，只在本人点击时发送）
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { ethers } from 'ethers';
 import { dataFile } from './config.js';
