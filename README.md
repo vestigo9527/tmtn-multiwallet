@@ -349,7 +349,9 @@ scripts/
 ├─ relogin.sh        单个钱包重新登录（查会话 → signout → 取码 → 前台挂 verify，绝不 kill）
 ├─ qr-session.sh     页面「登录」调用的独立会话：signout → 取码 → 常驻 verify，结果写 wallets/signin/N.json
 ├─ labels.sh         钱包备注读写（wallets/labels.env）
-└─ wallet-net.sh     容器出网通道（宿主 Clash ← ssh -R ← 虚拟机 socat → 容器）
+├─ wallet-net.sh     容器出网通道（宿主 Clash ← ssh -R ← 虚拟机 socat → 容器）
+├─ walletnet-watch.sh 通道守护：VM 起来后自动补 wallet-net.sh up（LaunchAgent 每 30 秒）
+└─ install-watch-agent.sh 装/卸上面那个 LaunchAgent（ai.tmtn.walletnet-watch）
 
 wallet-manager/      图形化备注管理台（零依赖 Node 服务）
 ├─ server.mjs        API：列出钱包 / 改备注 / 切实盘 / 取登录链接 / 一键新建 / 锁地址
