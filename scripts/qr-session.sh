@@ -39,8 +39,10 @@ if printf '%s' "$st" | grep -q '"CONNECTED"'; then
   exit 0
 fi
 
-# 2) 清残留流程 → 停 3 秒 → 取码
-rm -f "$RES"
+# 2) 真的要重新登录：先清掉上一张码和旧结果，免得页面读到残留的 SUCCESS 或过期码
+rm -f "$JSON" "$RES"
+
+# 3) 清残留会话 → 停 3 秒 → 取码
 say "signout 清残留流程"
 bawc --json auth signout >/dev/null 2>&1
 sleep 3
@@ -69,7 +71,7 @@ code="$(node -e 'console.log(require(process.argv[1]).pairingCode)' "$JSON" 2>/d
 say "出码 $code → $url"
 say "挂 verify 等扫码（绝不 kill）"
 
-# 3) 常驻等扫码；成功/过期后写结果
+# 4) 常驻等扫码；成功/失败都写结果（verify 挂上后绝不 kill）
 qid="$(node -e 'console.log(require(process.argv[1]).qrCodeId)' "$JSON" 2>/dev/null)"
 vout="$(bawc --json auth verify --qrCodeId "$qid" 2>&1)"
 printf '%s' "$vout" > "$UIDIR/$N.verify.log"

@@ -241,15 +241,23 @@ const pidAlive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); 
 function readSession(slot) {
   const f = readJSON(path.join(QR_DIR, `${slot}.json`));
   const r = readJSON(path.join(QR_DIR, `${slot}.result`));
-  if (!f || !f.urlForWeb) {
-    if (r) return { status: r.status === 'SUCCESS' ? 'success' : 'failed', result: r };
-    return { status: 'none', result: null };
+  const now = Date.now();
+  const live = !!(f && f.urlForWeb && Number(f.expireAt || 0) > now);
+  // 活码优先：只要还有未过期的码，就按 waiting 报，残留的 result 不能盖住它
+  if (live) {
+    return { slot, urlForWeb: f.urlForWeb, pairingCode: f.pairingCode, expireAt: Number(f.expireAt || 0),
+             pid: f.pid, alive: pidAlive(f.pid), status: 'waiting', result: r || null };
   }
-  let status = 'waiting';
-  if (r) status = r.status === 'SUCCESS' ? 'success' : 'failed';
-  else if (Number(f.expireAt || 0) < Date.now()) status = 'expired';
-  return { slot, urlForWeb: f.urlForWeb, pairingCode: f.pairingCode, expireAt: Number(f.expireAt || 0),
-           pid: f.pid, alive: pidAlive(f.pid), status, result: r || null };
+  if (r) {
+    return { slot, urlForWeb: f && f.urlForWeb, pairingCode: f && f.pairingCode,
+             expireAt: Number((f && f.expireAt) || 0), pid: f && f.pid, alive: f ? pidAlive(f.pid) : false,
+             status: r.status === 'SUCCESS' ? 'success' : 'failed', result: r };
+  }
+  if (f && f.urlForWeb) {
+    return { slot, urlForWeb: f.urlForWeb, pairingCode: f.pairingCode, expireAt: Number(f.expireAt || 0),
+             pid: f.pid, alive: pidAlive(f.pid), status: 'expired', result: null };
+  }
+  return { status: 'none', result: null };
 }
 
 function startSession(slot) {
@@ -290,7 +298,7 @@ async function startSignin(slot, opts = {}) {
     await sleep(700);
     const s = readSession(slot);
     if (s.status === 'success') return { ok: true, slot, already: true, status: 'connected' };
-    if (s.urlForWeb && s.status !== 'failed') {
+    if (s.urlForWeb && s.status !== 'failed' && Number(s.expireAt || 0) > Date.now() + 5000) {
       return { ok: true, slot, urlForWeb: s.urlForWeb, pairingCode: s.pairingCode,
                expireAt: s.expireAt, status: s.status };
     }

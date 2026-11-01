@@ -71,7 +71,7 @@
 const slot = Number(new URLSearchParams(location.search).get('slot') || 1);
 const $ = (id) => document.getElementById(id);
 const chan = ('BroadcastChannel' in window) ? new BroadcastChannel('wallet-manager') : null;
-let curUrl = '', shownUrl = '', busy = false, done = false;
+let curUrl = '', shownUrl = '', busy = false, done = false, autoKicked = false;
 
 const setState = (t, cls = '') => { const el = $('state'); el.textContent = t; el.className = 'state ' + cls; };
 const showQR = (url) => {
@@ -134,6 +134,7 @@ async function poll() {
     // 没有活码（或文件里的状态已过期但钱包其实没登录）→ 显示取码中，并给一个手动换码按钮
     showPending();
     $('retry').style.display = '';
+    if (!autoKicked) { autoKicked = true; kick(false); }   // 未登录且没活码：自动取一次
   } catch (e) {
     setState('连不上管理台：' + e.message, 'bad');
   }
