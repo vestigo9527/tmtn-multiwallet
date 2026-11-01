@@ -102,7 +102,6 @@ async function buildState() {
   }));
   const maxSlot = Math.max(...wallets.map((w) => w.slot));
   return { tmtn: TMTN, port: PORT, wallets, nextSlot: maxSlot + 1, signin: signinState(),
-           preparing: retryAt ? { slot: retrySlot, at: retryAt, waitSeconds: Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)) } : null,
            at: Date.now() };
 }
 
@@ -228,144 +227,85 @@ async function sessionState(slot) {
   return { ok, status, addr: addr || null };
 }
 
-// ---------- 扫码登录作业 ----------
-const signinJobs = new Map();
-// 手机退出登录之后，币安侧会话切换有传播延迟：紧接着取的第一张码必然被判
-// AUTH_REJECTED（"QR code does not exist or expired"），隔 1~3 分钟的下一次就正常。
-// 这不是用户操作错误，所以不提示"冷却"、不让用户等待——首张被拒就静默 60 秒后
-// 自动换新码，连续 MAX_ATTEMPTS 次都失败才如实报错。
-const RETRY_DELAY_MS = 60000;
-const MAX_ATTEMPTS = 3;
-let attempts = 0;
-let retryTimer = null;
-let retryAt = 0;
-let retrySlot = 0;
+// ---------- 扫码登录会话 ----------
+// 踩过的坑：管理台自己去 spawn `baw auth signin/verify`，币安侧必定回
+// AUTH_REJECTED（实测连续 6 次，1 秒内就被拒），而完全相同的命令在独立 bash
+// 进程里 100% 成功。所以取码这件事交给 scripts/qr-session.sh 在独立进程里跑，
+// 管理台只负责读它写出来的两个文件：
+//   wallets/signin/N.json    {urlForWeb, pairingCode, qrCodeId, expireAt, pid}
+//   wallets/signin/N.result  {status:"SUCCESS"|"FAILED", raw, at}
+const QR_DIR = path.join(TMTN, 'wallets', 'signin');
+const readJSON = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+const pidAlive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch { return false; } };
 
-function scheduleRetry(slot) {
-  if (retryTimer) return;
-  retrySlot = slot;
-  retryAt = Date.now() + RETRY_DELAY_MS;
-  log(`slot${slot} 首张码被币安判无效（第 ${attempts} 次，属预期），${RETRY_DELAY_MS / 1000} 秒后自动换新码`);
-  retryTimer = setTimeout(async () => {
-    retryTimer = null; retryAt = 0;
-    try { await startSignin(slot, { retry: true }); } catch (e) { log('静默重试失败', e.message); }
-  }, RETRY_DELAY_MS);
-  retryTimer.unref?.();
+function readSession(slot) {
+  const f = readJSON(path.join(QR_DIR, `${slot}.json`));
+  const r = readJSON(path.join(QR_DIR, `${slot}.result`));
+  if (!f || !f.urlForWeb) {
+    if (r) return { status: r.status === 'SUCCESS' ? 'success' : 'failed', result: r };
+    return { status: 'none', result: null };
+  }
+  let status = 'waiting';
+  if (r) status = r.status === 'SUCCESS' ? 'success' : 'failed';
+  else if (Number(f.expireAt || 0) < Date.now()) status = 'expired';
+  return { slot, urlForWeb: f.urlForWeb, pairingCode: f.pairingCode, expireAt: Number(f.expireAt || 0),
+           pid: f.pid, alive: pidAlive(f.pid), status, result: r || null };
 }
 
-function verifyArgs(slot, qrCodeId) {
-  return slot === 1
-    ? ['baw', ['--json', 'auth', 'verify', '--qrCodeId', qrCodeId]]
-    : ['docker', ['exec', `tmtn-wallet${slot}`, 'baw', '--json', 'auth', 'verify', '--qrCodeId', qrCodeId]];
-}
-
-function startVerify(slot, job) {
-  const [cmd, args] = verifyArgs(slot, job.qrCodeId);
-  const child = spawn(cmd, args, { cwd: TMTN, stdio: ['ignore', 'pipe', 'pipe'] });
-  job.child = child;
-  let buf = '';
-  const eat = (d) => { buf += d.toString(); if (buf.length > 20000) buf = buf.slice(-20000); };
-  child.stdout.on('data', eat);
-  child.stderr.on('data', eat);
-  child.on('error', (e) => { job.status = 'failed'; job.out = 'spawn 失败：' + e.message; job.endedAt = Date.now(); log(`slot${slot} verify spawn 失败`, e.message); });
-  child.on('close', (code, sig) => {
-    job.out = buf.trim().slice(-800) || `(无输出 code=${code} sig=${sig})`;
-    if (/"status"\s*:\s*"SUCCESS"/.test(buf)) {
-      job.status = 'success'; attempts = 0; retryAt = 0;
-      log(`slot${slot} 登录成功`);
-    } else if (job.status === 'waiting' && /NETWORK_ERROR|socket disconnected|ECONNRESET|ETIMEDOUT/i.test(buf)) {
-      job.retries = (job.retries || 0) + 1;         // 网络抖动：同一张码重挂，别重新取码
-      if (job.retries <= 6 && Date.now() < (job.expireAt - 5000)) {
-        log(`slot${slot} verify 网络断开，2 秒后同一张码重挂（第 ${job.retries} 次）`);
-        setTimeout(() => { if (job.status === 'waiting') startVerify(slot, job); }, 2000);
-        return;
-      }
-      job.status = 'failed';
-    } else if (/AUTH_REJECTED|does not exist or expired/i.test(buf)) {
-      job.status = 'rejected';
-      attempts += 1;
-      if (attempts < MAX_ATTEMPTS) scheduleRetry(slot);
-      else log(`slot${slot} 连续 ${attempts} 张码都被判无效，停下来等用户再点`);
-    } else if (/EXPIRED|FAILED|CANCELED|DECLINED/i.test(buf)) {
-      job.status = 'failed'; log(`slot${slot} 登录失败`, buf.slice(0, 120));
-    } else if (job.status === 'waiting') {
-      job.status = 'failed'; log(`slot${slot} verify 退出无结果`, buf.slice(0, 120));
-    }
-    job.endedAt = Date.now();
-  });
-  // 到点只标记过期，绝不 kill：杀掉 verify 会让币安侧的登录流程悬空，后续取码全被拒
-  const ttl = Math.max(30000, (job.expireAt || 0) - Date.now() + 20000);
-  const t = setTimeout(() => { if (job.status === 'waiting') job.status = 'expired'; }, ttl);
-  t.unref?.();
-}
-
-async function issueCode(slot) {
-  const link = await signinLink(slot);
-  if (!link.ok) { log(`slot${slot} signin 失败`, (link.out || '').slice(0, 140)); return { ok: false, out: link.out || link.error }; }
-  const job = { slot, qrCodeId: link.qrCodeId, urlForWeb: link.urlForWeb, pairingCode: link.pairingCode,
-                expireAt: link.expireAt, status: 'waiting', startedAt: Date.now(), out: '' };
-  signinJobs.set(slot, job);
-  startVerify(slot, job);
-  log(`slot${slot} 出码 ${link.pairingCode}，剩余 ${Math.round((link.expireAt - Date.now()) / 1000)}s`);
-  await sleep(3000);
-  return { ok: job.status === 'waiting', job, out: job.out };
+function startSession(slot) {
+  fs.mkdirSync(QR_DIR, { recursive: true });
+  fs.mkdirSync(path.join(TMTN, 'data'), { recursive: true });
+  const logf = path.join(TMTN, 'data', `qr-${slot}.log`);
+  const fd = fs.openSync(logf, 'a');
+  const child = spawn('bash', [path.join(TMTN, 'scripts', 'qr-session.sh'), String(slot)],
+    { cwd: TMTN, detached: true, stdio: ['ignore', fd, fd] });
+  child.unref();
+  try { fs.closeSync(fd); } catch {}
+  log(`slot${slot} 启动独立登录进程 pid=${child.pid}（日志 data/qr-${slot}.log）`);
+  return child.pid;
 }
 
 // 页面点「登录」：
-//   1) 有未过期的码 → 直接复用
-//   2) 会话仍可用 → 不扫码，直接返回已是登录状态
-//   3) 会话不可用 → signout 清残留 → 取码 → 挂 verify 等扫码
-//   4) 币安侧还在冷却 → 返回剩余秒数，到点自动出码
-async function startSignin(slot, opts = {}) {
-  const prev = signinJobs.get(slot);
-  if (prev && prev.status === 'waiting' && prev.expireAt > Date.now() + 20000) {
-    log(`slot${slot} 复用未过期的码 ${prev.pairingCode}`);
-    return { ok: true, slot, urlForWeb: prev.urlForWeb, pairingCode: prev.pairingCode,
-             expireAt: prev.expireAt, status: 'waiting', reused: true };
+//   1) 会话还能用 → 直接告诉页面「已登录」，绝不 signout
+//   2) 已有未过期的码 → 复用，不重复取码
+//   3) 否则交给 qr-session.sh：signout → 取码 → 常驻 verify，最多等 25 秒拿链接
+async function startSignin(slot) {
+  const st = await sessionState(slot);
+  if (st.ok) return { ok: true, slot, already: true, status: 'connected', address: st.addr };
+
+  const cur = readSession(slot);
+  if (cur.status === 'waiting' && cur.expireAt > Date.now() + 20000) {
+    log(`slot${slot} 复用未过期的码 ${cur.pairingCode}`);
+    return { ok: true, slot, urlForWeb: cur.urlForWeb, pairingCode: cur.pairingCode,
+             expireAt: cur.expireAt, status: 'waiting', reused: true };
   }
 
-  // 任何路径都要先查会话：force 只跳过"复用旧码"和"冷却"，绝不跳过登录态检查，
-  // 否则自动重试会对刚登录成功的钱包再 signout 一次，把用户踢下线。
-  {
-    const st = await sessionState(slot);
-    if (st.ok) {
-      const stale = signinJobs.get(slot);
-      if (stale && stale.status === 'waiting') { stale.status = 'success'; stale.endedAt = Date.now(); }
-      return { ok: true, slot, already: true, status: 'connected', address: st.addr };
+  startSession(slot);
+  const deadline = Date.now() + 25000;
+  while (Date.now() < deadline) {
+    await sleep(700);
+    const s = readSession(slot);
+    if (s.status === 'success') return { ok: true, slot, already: true, status: 'connected' };
+    if (s.urlForWeb && s.status !== 'failed') {
+      return { ok: true, slot, urlForWeb: s.urlForWeb, pairingCode: s.pairingCode,
+               expireAt: s.expireAt, status: s.status };
     }
   }
-
-  if (retryAt) {   // 已有一轮静默重试在排队，别叠加
-    return { ok: false, slot, error: 'preparing',
-             waitSeconds: Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)),
-             hint: '二维码正在准备，到点自动出现' };
-  }
-
-  log(`slot${slot} 开始取码（先 signout 清残留流程）`);
-  await bawExec(slot, ['--json', 'auth', 'signout'], 25000);
-  await sleep(3000);
-  const r = await issueCode(slot);
-  if (r.ok) {
-    const j = r.job;
-    return { ok: true, slot, urlForWeb: j.urlForWeb, pairingCode: j.pairingCode,
-             expireAt: j.expireAt, status: 'waiting' };
-  }
-  const rejected = /AUTH_REJECTED|does not exist or expired/i.test(r.out || '');
-  if (rejected && retryAt) {   // 首张码被拒是预期，已排好静默重试
-    return { ok: false, slot, error: 'preparing',
-             waitSeconds: Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)),
-             hint: '刚退出登录，币安侧要几十秒才允许重新登录；二维码会自动出现' };
-  }
-  return { ok: false, slot, error: 'failed', out: (r.out || '').slice(0, 300),
-           hint: '连续多张码都被币安判无效，稍等一会儿再点一次' };
+  const s = readSession(slot);
+  return { ok: false, slot, error: 'timeout',
+           out: s.result ? String(s.result.raw || '').slice(0, 300) : `取码超时，看 data/qr-${slot}.log` };
 }
 
 function signinState() {
   const out = {};
-  for (const [slot, j] of signinJobs) {
-    out[slot] = { status: j.status, pairingCode: j.pairingCode, urlForWeb: j.urlForWeb,
-                  expireAt: j.expireAt, out: j.out, startedAt: j.startedAt };
-    if (j.status === 'success' && Date.now() - (j.endedAt || Date.now()) > 60000) signinJobs.delete(slot);
+  let files = [];
+  try { files = fs.readdirSync(QR_DIR).filter((f) => /^\d+\.json$/.test(f)); } catch { return out; }
+  for (const f of files) {
+    const slot = Number(f.replace('.json', ''));
+    const s = readSession(slot);
+    if (s.status === 'none') continue;
+    out[slot] = { status: s.status, pairingCode: s.pairingCode, urlForWeb: s.urlForWeb,
+                  expireAt: s.expireAt, alive: s.alive, raw: s.result ? String(s.result.raw || '').slice(0, 300) : '' };
   }
   return out;
 }
@@ -394,9 +334,30 @@ const server = http.createServer(async (req, res) => {
       const b = await body(req);
       return json(res, 200, await addWallet({ slot: b.slot, label: b.label, live: Boolean(b.live), restart: Boolean(b.restart) }));
     }
+    if (url.pathname === '/api/session') {
+      const slot = Number(url.searchParams.get('slot') || 0);
+      return json(res, 200, { slot, ...readSession(slot) });
+    }
+    if (url.pathname === '/api/qr.svg') {
+      const slot = Number(url.searchParams.get('slot') || 0);
+      const s2 = readSession(slot);
+      if (!s2.urlForWeb) return json(res, 404, { ok: false, error: '还没有二维码' });
+      return execFile('qrencode', ['-t', 'SVG', '-l', 'M', '-m', '2', '-o', '-', s2.urlForWeb],
+        { maxBuffer: 4 << 20 }, (err, stdout) => {
+          if (err) return json(res, 500, { ok: false, error: err.message });
+          res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' });
+          res.end(stdout);
+        });
+    }
+    if (url.pathname === '/qr') {
+      const html = readText(path.join(PUBLIC, 'qr.html'), '缺少 qr.html');
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(html);
+    }
     if (url.pathname === '/api/signin' && req.method === 'POST') {
       const b = await body(req); return json(res, 200, await startSignin(Number(b.slot)));
     }
+    if (url.pathname === '/api/debug/env') return json(res, 200, { cwd: process.cwd(), execPath: process.execPath, ppid: process.ppid, env: Object.fromEntries(Object.entries(process.env).sort()) });
     if (url.pathname === '/api/health') return json(res, 200, { ok: true, tmtn: TMTN });
 
     const rel = url.pathname === '/' ? '/index.html' : url.pathname;

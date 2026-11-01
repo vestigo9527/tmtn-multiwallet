@@ -347,12 +347,14 @@ scripts/
 ├─ wallets.sh        总控：status / signin / lock / live / quote / peers / label / add
 ├─ signin-all.sh     批量扫码：一次开多个登录链接，过期自动重开，生成本地登录页
 ├─ relogin.sh        单个钱包重新登录（查会话 → signout → 取码 → 前台挂 verify，绝不 kill）
+├─ qr-session.sh     页面「登录」调用的独立会话：signout → 取码 → 常驻 verify，结果写 wallets/signin/N.json
 ├─ labels.sh         钱包备注读写（wallets/labels.env）
 └─ wallet-net.sh     容器出网通道（宿主 Clash ← ssh -R ← 虚拟机 socat → 容器）
 
 wallet-manager/      图形化备注管理台（零依赖 Node 服务）
 ├─ server.mjs        API：列出钱包 / 改备注 / 切实盘 / 取登录链接 / 一键新建 / 锁地址
 ├─ public/index.html 页面（卡片式）
+├─ public/qr.html    扫码页（新标签页打开，本地 qrencode 画二维码）
 └─ ctl.sh            start | stop | status | open
 ```
 
@@ -372,6 +374,14 @@ wallet-manager/ctl.sh start   # 管理台 → http://127.0.0.1:8899
 ```
 
 管理台里可以直接改备注（钱包 2–7 会自动重建容器，登录态不丢）、切实盘/只报价、取登录链接、点「＋ 新建钱包」一键加深色流程：检查出网通道 → 建容器 → 同步 peers → 重启主后端 → 给出扫码链接。
+
+点卡片上的「登录」：已登录就只提示「已登录」，不动会话；未登录会**新开一个标签页**给二维码，扫码确认后改回「已登录」。二维码由本机 `qrencode` 画成 SVG（`uni-qr` 链接在桌面浏览器只会跳到 App 下载页，必须自己画码），所以管理台需要：
+
+```bash
+brew install qrencode
+```
+
+取码本身交给独立进程 `scripts/qr-session.sh`，不用管理台进程直接 spawn `baw`——后者会被币安侧判 `AUTH_REJECTED`（见 `docs/本地多钱包-运维手册.md` 8.2 的对照实验）。
 
 > ⚠️ 加了钱包之后，别忘了每个钱包的 `LIVE_TRADE` 默认是 0（只报价）。
 

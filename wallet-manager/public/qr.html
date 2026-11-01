@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>扫码登录 · 钱包</title>
+<style>
+  :root {
+    --bg: #0b0e14; --card: #141924; --line: #232a3a; --text: #e6e9f0; --dim: #8b95a8;
+    --on: #35d07f; --warn: #f0b429; --bad: #ef5350; --accent: #4c8dff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(1200px 600px at 50% -10%, #16203a, var(--bg)); color: var(--text);
+    font: 15px/1.6 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; padding: 24px; }
+  .card { width: min(460px, 100%); background: var(--card); border: 1px solid var(--line);
+    border-radius: 18px; padding: 26px; box-shadow: 0 24px 60px rgba(0,0,0,.45); text-align: center; }
+  h1 { margin: 0 0 4px; font-size: 19px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 18px; }
+  .qrbox { width: 288px; height: 288px; margin: 0 auto 16px; border-radius: 14px; background: #fff;
+    padding: 10px; display: flex; align-items: center; justify-content: center; position: relative; }
+  .qrbox img { width: 100%; height: 100%; display: block; }
+  .qrbox .ph { color: #55607a; font-size: 13px; line-height: 1.7; }
+  .spin { width: 28px; height: 28px; border: 3px solid #d5dbe8; border-top-color: var(--accent);
+    border-radius: 50%; animation: sp .9s linear infinite; margin: 0 auto 10px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .pair { font-size: 13px; color: var(--dim); margin-bottom: 6px; }
+  .pair b { color: var(--text); font-size: 22px; letter-spacing: 4px; font-family: ui-monospace, monospace; }
+  .state { margin-top: 12px; font-size: 14px; padding: 10px 14px; border-radius: 10px;
+    background: #10141d; border: 1px solid var(--line); }
+  .state.on { color: var(--on); border-color: #1f5a3c; background: #0f1f18; }
+  .state.warn { color: var(--warn); border-color: #4a3a12; background: #1c1710; }
+  .state.bad { color: var(--bad); border-color: #4a1f1f; background: #1d1213; }
+  .row { margin-top: 14px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  button, a.btn { font: inherit; padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line);
+    background: #1b2230; color: var(--text); cursor: pointer; text-decoration: none; }
+  button:hover, a.btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04101f; font-weight: 600; }
+  .tip { margin-top: 16px; color: var(--dim); font-size: 12px; line-height: 1.8; text-align: left; }
+  .tip b { color: #b9c3d6; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="title">钱包 1 · 扫码登录</h1>
+  <div class="sub" id="sub">币安 Agentic Wallet</div>
+
+  <div class="qrbox" id="qrbox"><div class="ph">正在取码…</div></div>
+
+  <div class="pair" id="pair" style="display:none">配对码 <b id="code">------</b></div>
+  <div class="state" id="state">正在取码…</div>
+
+  <div class="row">
+    <button id="retry" class="primary" style="display:none">换一张二维码</button>
+    <a class="btn" id="back" href="/">回到管理台</a>
+  </div>
+
+  <div class="tip">
+    <b>怎么扫：</b>打开币安 App → 右上角「扫一扫」→ 扫上面的二维码 → 在手机上点确认。<br>
+    <b>扫完这里会自动变成「已登录」</b>，管理台那一页也会同步刷新，不用手动刷新。<br>
+    <b>一张码 5 分钟有效</b>；过期了点「换一张二维码」。
+  </div>
+</div>
+
+<script>
+const slot = Number(new URLSearchParams(location.search).get('slot') || 1);
+const $ = (id) => document.getElementById(id);
+const chan = ('BroadcastChannel' in window) ? new BroadcastChannel('wallet-manager') : null;
+let curUrl = '', shownUrl = '', busy = false, done = false;
+
+const setState = (text, cls = '') => { const el = $('state'); el.textContent = text; el.className = 'state ' + cls; };
+const setQR = (url) => {
+  if (!url || url === shownUrl) return;
+  shownUrl = url;
+  $('qrbox').innerHTML = '<img alt="二维码" src="/api/qr.svg?slot=' + slot + '&t=' + Date.now() + '">';
+};
+
+async function poll() {
+  try {
+    const r = await fetch('/api/session?slot=' + slot, { cache: 'no-store' }).then((x) => x.json());
+    if (r.status === 'success') {
+      done = true;
+      setQR(curUrl || r.urlForWeb);
+      setState('已登录 ✓', 'on');
+      $('retry').style.display = 'none';
+      $('sub').textContent = '这个钱包已经登录，可以关掉本页';
+      chan && chan.postMessage({ type: 'signed-in', slot });
+      try { localStorage.setItem('wallet-signed-in-' + slot, String(Date.now())); } catch {}
+      return;
+    }
+    if (r.urlForWeb) {
+      curUrl = r.urlForWeb;
+      setQR(r.urlForWeb);
+      $('pair').style.display = '';
+      $('code').textContent = r.pairingCode || '------';
+      const left = Math.max(0, Math.round((r.expireAt - Date.now()) / 1000));
+      const mm = String(Math.floor(left / 60)).padStart(1, '0');
+      const ss = String(left % 60).padStart(2, '0');
+      if (r.status === 'waiting') {
+        setState('等扫码 · 剩余 ' + mm + ':' + ss);
+        $('retry').style.display = 'none';
+      } else if (r.status === 'expired') {
+        setState('二维码过期了，点下面「换一张二维码」', 'warn');
+        $('retry').style.display = '';
+      } else if (r.status === 'failed') {
+        setState('取码失败：' + (r.raw || '看管理台日志').slice(0, 120), 'bad');
+        $('retry').style.display = '';
+      }
+    } else {
+      setState('正在取码…（约 10 秒）');
+    }
+  } catch (e) {
+    setState('连不上管理台：' + e.message, 'bad');
+  }
+}
+
+$('retry').onclick = async () => {
+  if (busy) return; busy = true;
+  $('retry').disabled = true; setState('正在换一张…');
+  try {
+    await fetch('/api/signin', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slot }) });
+  } catch {}
+  $('retry').disabled = false; busy = false; shownUrl = '';
+  poll();
+};
+
+$('title').textContent = '钱包 ' + slot + ' · 扫码登录';
+(async () => {
+  const st = await fetch('/api/state', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
+  const w = st && st.wallets && st.wallets.find((x) => x.slot === slot);
+  if (w) {
+    $('title').textContent = '钱包 ' + slot + ' · ' + (w.label || '未命名');
+    $('sub').textContent = (w.address || '未登录') + (w.live ? ' · 实盘' : ' · 只报价');
+    if (w.auth === 'ok') { done = true; setState('已登录 ✓', 'on'); }
+  }
+})();
+poll();
+setInterval(() => { if (!done) poll(); }, 1500);
+</script>
+</body>
+</html>
