@@ -101,7 +101,7 @@ async function buildState() {
     };
   }));
   const maxSlot = Math.max(...wallets.map((w) => w.slot));
-  return { tmtn: TMTN, port: PORT, wallets, nextSlot: maxSlot + 1, at: Date.now() };
+  return { tmtn: TMTN, port: PORT, wallets, nextSlot: maxSlot + 1, signin: signinState(), at: Date.now() };
 }
 
 // ---------- 写操作 ----------
@@ -205,6 +205,78 @@ async function signinLink(slot) {
   }
 }
 
+// ---------- 扫码登录作业：signin 之后必须一直挂着 verify，否则扫码也不会落地 ----------
+const signinJobs = new Map();   // slot -> { status, urlForWeb, pairingCode, expireAt, out, child }
+
+function verifyArgs(slot, qrCodeId) {
+  return slot === 1
+    ? ['baw', ['--json', 'auth', 'verify', '--qrCodeId', qrCodeId]]
+    : ['docker', ['exec', `tmtn-wallet${slot}`, 'baw', '--json', 'auth', 'verify', '--qrCodeId', qrCodeId]];
+}
+
+function startVerify(slot, job) {
+  const [cmd, args] = verifyArgs(slot, job.qrCodeId);
+  const child = spawn(cmd, args, { cwd: TMTN, stdio: ['ignore', 'pipe', 'pipe'] });
+  job.child = child;
+  let buf = '';
+  const eat = (d) => { buf += d.toString(); if (buf.length > 20000) buf = buf.slice(-20000); };
+  child.stdout.on('data', eat);
+  child.stderr.on('data', eat);
+  child.on('exit', (code) => {
+    job.out = buf.trim().slice(-800);
+    if (/"status"\s*:\s*"SUCCESS"/.test(buf)) job.status = 'success';
+    else if (/EXPIRED|FAILED|CANCELED|DECLINED/i.test(buf)) job.status = 'failed';
+    else job.status = code === 0 && job.status === 'waiting' ? 'success' : (job.status === 'waiting' ? 'failed' : job.status);
+    job.endedAt = Date.now();
+  });
+  const ttl = Math.max(30000, (job.expireAt || 0) - Date.now() + 25000);
+  const t = setTimeout(() => {
+    if (job.status === 'waiting') { job.status = 'expired'; try { child.kill(); } catch {} }
+    signinJobs.delete(slot);   // 过期清掉，避免一直显示
+  }, ttl);
+  t.unref?.();
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function startSignin(slot) {
+  const prev = signinJobs.get(slot);
+  if (prev?.child) { try { prev.child.kill(); } catch {} }
+  signinJobs.delete(slot);
+
+  let last = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const link = await signinLink(slot);
+    if (!link.ok) return link;
+    const job = { slot, qrCodeId: link.qrCodeId, urlForWeb: link.urlForWeb, pairingCode: link.pairingCode,
+                  expireAt: link.expireAt, status: 'waiting', startedAt: Date.now(), out: '' };
+    signinJobs.set(slot, job);
+    startVerify(slot, job);
+    await sleep(3000);                       // 等 3 秒看 verify 是否被服务端直接拒掉
+    if (job.status === 'waiting') {          // 正常：verify 正在等扫码
+      return { ok: true, slot, urlForWeb: job.urlForWeb, pairingCode: job.pairingCode,
+               expireAt: job.expireAt, status: job.status, attempt };
+    }
+    last = job;
+    if (!/AUTH_REJECTED|does not exist or expired/i.test(job.out || '')) break;   // 不是旧流程未清的锅就别重试
+    try { job.child?.kill(); } catch {}
+    signinJobs.delete(slot);
+    await sleep(8000);   // 取码太勤会被币安限流（SERVICE_ERROR / System abnormality），拉长间隔
+  }
+  return { ok: false, slot, error: last?.status || 'unknown', out: (last?.out || '').slice(0, 300),
+           urlForWeb: last?.urlForWeb, pairingCode: last?.pairingCode };
+}
+
+function signinState() {
+  const out = {};
+  for (const [slot, j] of signinJobs) {
+    out[slot] = { status: j.status, pairingCode: j.pairingCode, urlForWeb: j.urlForWeb,
+                  expireAt: j.expireAt, out: j.out, startedAt: j.startedAt };
+    if (j.status === 'success' && Date.now() - (j.endedAt || Date.now()) > 60000) signinJobs.delete(slot);
+  }
+  return out;
+}
+
 // ---------- HTTP ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const json = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); };
@@ -230,7 +302,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await addWallet({ slot: b.slot, label: b.label, live: Boolean(b.live), restart: Boolean(b.restart) }));
     }
     if (url.pathname === '/api/signin' && req.method === 'POST') {
-      const b = await body(req); return json(res, 200, await signinLink(b.slot));
+      const b = await body(req); return json(res, 200, await startSignin(Number(b.slot)));
     }
     if (url.pathname === '/api/health') return json(res, 200, { ok: true, tmtn: TMTN });
 

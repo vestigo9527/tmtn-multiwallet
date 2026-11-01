@@ -29,8 +29,3 @@ data-*/
 
 # 额外钱包的容器配置：登录信息（baw/）、数据、访问令牌都在这里，不要提交
 wallets/
-
-# 管理台运行时文件
-.pm.pid
-data-pm.log
-release/
