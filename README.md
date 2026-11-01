@@ -189,14 +189,14 @@ scripts/             只读的辅助脚本（耗时报表、测试网信息、�
 
 ### 1. 让 AI 帮你搭起来
 
-把下面这段交给你的 AI 助手执行（登录币安钱包那一步必须你本人在手机上确认）：
+把下面这段交给你的 AI 助手执行（登录币安钱包那一步必须你demo2.ai在手机上确认）：
 
 ```bash
 git clone <本仓库地址> tmtn && cd tmtn
 npm install
 cp .env.example .env            # 需要的话在 .env 里填 NODEREAL_RPC 等；key 只放这里
 npm i -g @binance/agentic-wallet
-baw auth signin                 # 终端会给出链接 / 二维码，由你本人在币安 App 里确认
+baw auth signin                 # 终端会给出链接 / 二维码，由你demo2.ai在币安 App 里确认
 npx skills add binance/binance-skills-hub --skill binance-agentic-wallet   # 交易 Four 专属模板需要
 npm run sim:8787                # 先用模拟盘跑通：http://127.0.0.1:8787
 npm run live:8788               # 确认没问题后再开实盘：http://127.0.0.1:8788
@@ -346,6 +346,7 @@ scripts/
 ├─ add-wallet.sh     建/改单个钱包容器（MAC、端口、代理、环境变量）
 ├─ wallets.sh        总控：status / signin / lock / live / quote / peers / label / add
 ├─ signin-all.sh     批量扫码：一次开多个登录链接，过期自动重开，生成本地登录页
+├─ relogin.sh        单个钱包重新登录（查会话 → signout → 取码 → 前台挂 verify，绝不 kill）
 ├─ labels.sh         钱包备注读写（wallets/labels.env）
 └─ wallet-net.sh     容器出网通道（宿主 Clash ← ssh -R ← 虚拟机 socat → 容器）
 
@@ -365,6 +366,7 @@ npm run live                  # 钱包 1 → http://127.0.0.1:8787
 scripts/add-wallet.sh 2       # 建钱包 2 的容器（端口 8789、独立 MAC）
 scripts/wallets.sh signin 2   # 打印二维码链接 + 配对码，用对应币安账号扫码
 scripts/wallets.sh lock       # 把登录后的地址写死，防扫错账号下错单
+scripts/relogin.sh 2          # 手机端退出登录后，用这条命令重新登（取码 + 常驻 verify 一步到位）
 
 wallet-manager/ctl.sh start   # 管理台 → http://127.0.0.1:8899
 ```

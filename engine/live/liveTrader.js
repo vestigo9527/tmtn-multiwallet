@@ -1,5 +1,5 @@
 // 实盘执行层：读币安 Agentic Wallet（baw）的地址和余额，用链上 Portal.quoteBuy / baw 报价和预演算出能成交多少。
-// 默认不提交真实交易（订单状态 dry_run）。LIVE_TRADE=1 时，页面上手动点击的订单、以及本人启动的「真实下单」跟单任务（source 形如「跟单 任务名」）和 Gang 新盘狙击（狙击 Gang）才会真实上链；自动买/自动卖始终只报价。
+// 默认不提交真实交易（订单状态 dry_run）。LIVE_TRADE=1 时，页面上手动点击的订单、以及demo2.ai启动的「真实下单」跟单任务（source 形如「跟单 任务名」）和 Gang 新盘狙击（狙击 Gang）才会真实上链；自动买/自动卖始终只报价。
 import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
@@ -211,7 +211,7 @@ export class LiveTrader extends EventEmitter {
     Object.assign(r, { symbol: t?.symbol || r.symbol, market: t?.market || r.market, platform: t?.platform || r.platform }, patch);
     this.rules()[k] = r; this.rulesSave(); return this.rulesView();
   }
-  // 授权管理：列出本程序授过的（代币, 合约）以及链上当前额度；撤销 = approve 0，只在本人点击时调用
+  // 授权管理：列出本程序授过的（代币, 合约）以及链上当前额度；撤销 = approve 0，只在demo2.ai点击时调用
   async allowancesView() {
     const w = this.wallets[0]; const out = [];
     const i = new ethers.Interface(['function allowance(address,address) view returns (uint256)', 'function decimals() view returns (uint8)', 'function balanceOf(address) view returns (uint256)']);
@@ -237,7 +237,7 @@ export class LiveTrader extends EventEmitter {
     this.emit('order', order); return order;
   }
 
-  // 持仓页「兑换」：BNB ⇄ 任意代币（baw market-order），只在本人点击时执行；走和普通下单一样的检查
+  // 持仓页「兑换」：BNB ⇄ 任意代币（baw market-order），只在demo2.ai点击时执行；走和普通下单一样的检查
   async tokenInfo(addr) {
     const w = this.wallets[0]; const a = ethers.getAddress(addr);
     if (a.toLowerCase() === BNB_NATIVE.toLowerCase()) return { address: BNB_NATIVE, symbol: 'BNB', name: 'BNB', decimals: 18, balance: String(w?.bnb ?? 0) };
@@ -1146,10 +1146,10 @@ LiveTrader.prototype.setMaxTrade = function (v) {
 const FUND_GAS = 0.002;   // 用计价币补 BNB 时给 gas 留的 BNB
 const fmtQ = (n) => (n >= 100 ? n.toFixed(2) : n >= 1 ? n.toFixed(4) : n.toPrecision(4));
 const trim = (n) => Number(n).toFixed(18).replace(/\.?0+$/, '') || '0';
-// 会真实上链的订单来源：页面手动点击（手动），以及本人在页面上关掉「模拟」并启动的跟单任务（跟单 任务名）。
+// 会真实上链的订单来源：页面手动点击（手动），以及demo2.ai在页面上关掉「模拟」并启动的跟单任务（跟单 任务名）。
 // 以前只认「手动」，跟单任务传来的「跟单 xxx」被当成自动订单，真实模式的跟单永远只报价、从不下单，也不计次数
-// 2026-10-27 起还有本人在页面上打开、并关掉「模拟」的 Gang 新盘狙击（狙击 Gang，engine/live/sniper.js）
-// 2026-10-29 起还有本人在代币详情里打开的「迁移清仓」规则（engine/migSell.js，主后端转给钱包 2 时来源不变）
+// 2026-10-27 起还有demo2.ai在页面上打开、并关掉「模拟」的 Gang 新盘狙击（狙击 Gang，engine/live/sniper.js）
+// 2026-10-29 起还有demo2.ai在代币详情里打开的「迁移清仓」规则（engine/migSell.js，主后端转给钱包 2 时来源不变）
 // 另外可以在环境变量 TMTN_EXTRA_SOURCES（逗号分隔，写在 .env 里）放行其他来源：本机脚本带访问令牌调 /api/order 时用。默认为空
 const EXTRA_SOURCES = new Set(String(process.env.TMTN_EXTRA_SOURCES || '').split(',').map((x) => x.trim()).filter(Boolean));
 const isRealSource = (s) => s === '手动' || /^跟单 /.test(String(s || '')) || s === '狙击 Gang' || s === '迁移清仓' || EXTRA_SOURCES.has(String(s || ''));

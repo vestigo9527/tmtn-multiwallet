@@ -196,7 +196,7 @@ status "$N" || die "后端没起来：docker logs --tail 50 $NAME"
 
 echo
 echo "实盘：$([ "$LIVE" = 1 ] && echo '真实下单（LIVE_TRADE=1）' || echo '只报价（LIVE_TRADE=0），确认无误后加 --live 重新运行')"
-echo "登录（需要本人操作，用钱包 $N 对应的币安账号）：docker exec -it $NAME baw auth signin"
+echo "登录（需要demo2.ai操作，用钱包 $N 对应的币安账号）：docker exec -it $NAME baw auth signin"
 echo "查看状态：scripts/add-wallet.sh $N --status"
 echo "WALLET_PEERS=$(peers_json)"
 [ "$WRITE_ENV" = 1 ] && write_env || echo "（加 --write-env 可以把上面这行写进 .env）"

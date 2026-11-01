@@ -51,7 +51,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const NAMES = {}; let namesVer = -1;
 const nameOf = (r) => r.name || NAMES[String(r.trader || '').toLowerCase()] || null;
 setInterval(async () => { try { const j = await api(`/api/names?ver=${namesVer}`); if (j.names) { Object.assign(NAMES, j.names); namesVer = j.ver; } } catch { /* ignore */ } }, 3000);
-// 钱包颜色（全站统一走 whoHtml）：自己的钱包（按地址比）绿色 + 「我·N」；备注 / 追踪过的钱包黄色，显示备注名；其他钱包（包括 .ai / .bnb 域名）一律白色
+// 钱包demo8.ai色（全站统一走 whoHtml）：自己的钱包（按地址比）绿色 + 「我·N」；备注 / 追踪过的钱包黄色，显示备注名；其他钱包（包括 .ai / .bnb 域名）一律白色
 const myAddr = () => String(S.baw?.auth?.address || (LIVE() ? S.wallets[0]?.address : '') || '').toLowerCase();
 // 自己的所有钱包（多钱包时钱包 1、2…都算「我」）：地址 → 第几个钱包
 function myWallets() {
@@ -844,7 +844,7 @@ const volBar = (d) => ({ time: d.t + tz, value: d.v, color: d.c >= d.o ? CT.vu :
 const CH = { key: '', len: 0, lastT: 0, markers: '' };
 const Y = { zoom: 1 };
 function resetView() { CH.key = ''; Y.zoom = 1; }
-// 主题（theme.js / theme.css）：K 线颜色读 --chart-* 变量，没设就是经典配色；切主题时重画
+// 主题（theme.js / theme.css）：K 线demo8.ai色读 --chart-* 变量，没设就是经典配色；切主题时重画
 const CT = { up: '#1ecb81', down: '#f6465d', vu: 'rgba(30,203,129,.45)', vd: 'rgba(246,70,93,.45)' };
 function applyChartTheme() {
   const cs = getComputedStyle(document.documentElement), v = (k, d) => cs.getPropertyValue('--chart-' + k).trim() || d;
@@ -2156,7 +2156,7 @@ async function loadCallouts() {
 }
 const coNorm = (v) => String(v || '').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 function coEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-// 没头像：按名字算一个固定颜色的圆形首字母头像（同一个人每次颜色一样）
+// 没头像：按名字算一个固定demo8.ai色的圆形首字母头像（同一个人每次demo8.ai色一样）
 function coAv0(author) {
   const a = String(author || '?'), ch = [...a.replace(/^0x(?=[0-9a-f]{40}$)/i, '')][0] || '?';
   let h = 0; for (const c of a) h = (h * 31 + c.codePointAt(0)) >>> 0;
@@ -2711,7 +2711,7 @@ function tcCard(t, k) {
         <span class="tc-buy">${TC_ST[st] || tcBuyLabel(t, k)}</span></div>`}</div>`;
 }
 const amtFmt = (v) => amt(v);
-// 交易页左栏的紧凑卡片（和战壕同一套颜色、直角、图标，但三行排版、约 80px 高）
+// 交易页左栏的紧凑卡片（和战壕同一套demo8.ai色、直角、图标，但三行排版、约 80px 高）
 // 第 1 行：头像 | 代号 名字 … MC | ★ ⊘；第 2 行：税 / 计价 / Agent 标签 + 时长 · 1h · 持有人；第 3 行：进度细条 + 已筹/目标 · % + ⚡买
 function tlCard(t) {
   const plat = platOf(t), curve = t.stage === 'curve', prog = Math.min(100, Number(t.progress) || 0), k = curve ? 'new' : 'dex', st = tcState.get(t.address);
@@ -3028,7 +3028,7 @@ function openDonate() {
 $('#donateBtn')?.addEventListener('click', openDonate);
 
 /* ---------- 追踪 + 跟单 ---------- */
-// 追踪：关注的地址在内盘上的买卖（链上订阅筛出来，服务器推送）。跟单：每个任务跟一个目标，新建一律「暂停 + 模拟」，要本人打开
+// 追踪：关注的地址在内盘上的买卖（链上订阅筛出来，服务器推送）。跟单：每个任务跟一个目标，新建一律「暂停 + 模拟」，要demo2.ai打开
 const ACT_CLS = { 建仓: 'g', 加仓: 'g', 减仓: 'r', 清仓: 'r' };
 const trkAgo = (ts) => { const s = Math.max(0, (Date.now() - ts) / 1000); return s < 60 ? Math.floor(s) + '秒' : s < 3600 ? Math.floor(s / 60) + '分' : s < 86400 ? Math.floor(s / 3600) + '时' : Math.floor(s / 86400) + '天'; };
 // 最小金额（BNB）：追踪抽屉和追踪页共用，记在浏览器里；没有 BNB 金额的成交（非 BNB 计价）不按金额过滤

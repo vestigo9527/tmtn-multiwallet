@@ -1123,7 +1123,7 @@ html, body { font-family: var(--sans); font-variant-numeric: tabular-nums; }
 body { font-weight: var(--fw-body); }
 b, strong, th { font-weight: var(--fw-strong); }
 h1, h2, h3, h4, .lh b, .tch b, .trkp-h b { font-weight: var(--fw-head); }
-/* 顶栏：当前页 = 黄底黑字（不能只改文字颜色，否则黄底黄字看不见） */
+/* 顶栏：当前页 = 黄底黑字（不能只改文字demo8.ai色，否则黄底黄字看不见） */
 #viewSw button.active { color: #111; background: var(--y); }
 #viewSw button { white-space: nowrap; flex: none; }
 /* 战壕：近黑底、深紫蓝卡片、洋红 MC 框、粉色快买 */

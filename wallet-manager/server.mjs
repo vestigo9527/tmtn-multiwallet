@@ -101,7 +101,8 @@ async function buildState() {
     };
   }));
   const maxSlot = Math.max(...wallets.map((w) => w.slot));
-  return { tmtn: TMTN, port: PORT, wallets, nextSlot: maxSlot + 1, signin: signinState(), at: Date.now() };
+  return { tmtn: TMTN, port: PORT, wallets, nextSlot: maxSlot + 1, signin: signinState(),
+           cooldownUntil: Date.now() < poisonUntil ? poisonUntil : 0, at: Date.now() };
 }
 
 // ---------- 写操作 ----------
@@ -205,27 +206,37 @@ async function signinLink(slot) {
   }
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (...a) => console.log(new Date().toLocaleTimeString('zh-CN'), '[signin]', ...a);
+
 function bawExec(slot, args, timeout = 60000) {
   return slot === 1 ? sh('baw', args, { timeout })
                     : sh('docker', ['exec', `tmtn-wallet${slot}`, 'baw', ...args], { timeout });
 }
 
-async function isConnected(slot) {
-  const r = await bawExec(slot, ['--json', 'wallet', 'status'], 30000);
-  return /"status"\s*:\s*"CONNECTED"/.test(r.out) || /CONNECTED/.test(r.out);
+// 会话是否可用：baw 的 status + wallet address 双重校验（NOT_LOGGED_IN 就一定不可用）
+async function sessionState(slot) {
+  const st = await bawExec(slot, ['--json', 'wallet', 'status'], 25000);
+  const m = /"status"\s*:\s*"([A-Z_]+)"/.exec(st.out || '');
+  const status = m ? m[1] : 'UNKNOWN';
+  const ad = await bawExec(slot, ['--json', 'wallet', 'address'], 25000);
+  const notLogged = /NOT_LOGGED_IN/.test(ad.out || '');
+  const addr = (/0x[0-9a-fA-F]{40}/.exec(ad.out || '') || [null])[0];
+  const ok = status === 'CONNECTED' && !notLogged && !!addr;
+  log(`slot${slot} 会话检查: status=${status} notLoggedIn=${notLogged} addr=${addr || '-'} → ${ok ? '可用' : '不可用'}`);
+  return { ok, status, addr: addr || null };
 }
 
-// 币安侧登录流程卡住时，新码一律 AUTH_REJECTED（"restart the log in process"）：
-// 未登录的钱包先 signout 把残留流程清掉，再取新码
-async function resetLoginFlow(slot) {
-  if (await isConnected(slot)) return false;   // 已登录的钱包绝不动，signout 会把人踢下线
-  await bawExec(slot, ['--json', 'auth', 'signout'], 30000);
-  await new Promise((r) => setTimeout(r, 1500));
-  return true;
-}
-
-// ---------- 扫码登录作业：signin 之后必须一直挂着 verify，否则扫码也不会落地 ----------
-const signinJobs = new Map();   // slot -> { status, urlForWeb, pairingCode, expireAt, out, child }
+// ---------- 扫码登录作业 ----------
+const signinJobs = new Map();
+// 币安侧一张码被作废/被拒后，同一设备在它的 5 分钟窗口内再取码会被一路 AUTH_REJECTED。
+// 记下"最早可再试的时间"，到点自动出码，避免用户反复点、越点越死。
+let poisonUntil = 0;
+let retryTimer = null;
+let failStreak = 0;
+const backoffMs = () => (failStreak <= 1
+  ? 90000
+  : Math.min(20, 5 * Math.pow(2, Math.max(0, failStreak - 2))) * 60000);
 
 function verifyArgs(slot, qrCodeId) {
   return slot === 1
@@ -241,55 +252,109 @@ function startVerify(slot, job) {
   const eat = (d) => { buf += d.toString(); if (buf.length > 20000) buf = buf.slice(-20000); };
   child.stdout.on('data', eat);
   child.stderr.on('data', eat);
-  child.on('error', (e) => { job.out = 'spawn 失败：' + e.message; job.status = 'failed'; job.endedAt = Date.now(); });
+  child.on('error', (e) => { job.status = 'failed'; job.out = 'spawn 失败：' + e.message; job.endedAt = Date.now(); log(`slot${slot} verify spawn 失败`, e.message); });
   child.on('close', (code, sig) => {
     job.out = buf.trim().slice(-800) || `(无输出 code=${code} sig=${sig})`;
-    if (/"status"\s*:\s*"SUCCESS"/.test(buf)) job.status = 'success';
-    else if (/EXPIRED|FAILED|CANCELED|DECLINED/i.test(buf)) job.status = 'failed';
-    else job.status = code === 0 && job.status === 'waiting' ? 'success' : (job.status === 'waiting' ? 'failed' : job.status);
+    if (/"status"\s*:\s*"SUCCESS"/.test(buf)) {
+      job.status = 'success'; poisonUntil = 0; failStreak = 0;
+      log(`slot${slot} 登录成功`);
+    } else if (job.status === 'waiting' && /NETWORK_ERROR|socket disconnected|ECONNRESET|ETIMEDOUT/i.test(buf)) {
+      job.retries = (job.retries || 0) + 1;         // 网络抖动：同一张码重挂，别重新取码
+      if (job.retries <= 6 && Date.now() < (job.expireAt - 5000)) {
+        log(`slot${slot} verify 网络断开，2 秒后同一张码重挂（第 ${job.retries} 次）`);
+        setTimeout(() => { if (job.status === 'waiting') startVerify(slot, job); }, 2000);
+        return;
+      }
+      job.status = 'failed';
+    } else if (/AUTH_REJECTED|does not exist or expired/i.test(buf)) {
+      job.status = 'rejected';
+      failStreak += 1;
+      poisonUntil = Math.max(poisonUntil, Date.now() + backoffMs());
+      log(`slot${slot} 被币安判无效（连续第 ${failStreak} 次），冷却 ${Math.round(backoffMs() / 60000)} 分钟，到 ${new Date(poisonUntil).toLocaleTimeString('zh-CN')}`);
+    } else if (/EXPIRED|FAILED|CANCELED|DECLINED/i.test(buf)) {
+      job.status = 'failed'; log(`slot${slot} 登录失败`, buf.slice(0, 120));
+    } else if (job.status === 'waiting') {
+      job.status = 'failed'; log(`slot${slot} verify 退出无结果`, buf.slice(0, 120));
+    }
     job.endedAt = Date.now();
   });
-  const ttl = Math.max(30000, (job.expireAt || 0) - Date.now() + 25000);
-  const t = setTimeout(() => {
-    if (job.status === 'waiting') { job.status = 'expired'; try { child.kill(); } catch {} }
-    signinJobs.delete(slot);   // 过期清掉，避免一直显示
-  }, ttl);
+  // 到点只标记过期，绝不 kill：杀掉 verify 会让币安侧的登录流程悬空，后续取码全被拒
+  const ttl = Math.max(30000, (job.expireAt || 0) - Date.now() + 20000);
+  const t = setTimeout(() => { if (job.status === 'waiting') job.status = 'expired'; }, ttl);
   t.unref?.();
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function issueCode(slot) {
+  const link = await signinLink(slot);
+  if (!link.ok) { log(`slot${slot} signin 失败`, (link.out || '').slice(0, 140)); return { ok: false, out: link.out || link.error }; }
+  const job = { slot, qrCodeId: link.qrCodeId, urlForWeb: link.urlForWeb, pairingCode: link.pairingCode,
+                expireAt: link.expireAt, status: 'waiting', startedAt: Date.now(), out: '' };
+  signinJobs.set(slot, job);
+  startVerify(slot, job);
+  log(`slot${slot} 出码 ${link.pairingCode}，剩余 ${Math.round((link.expireAt - Date.now()) / 1000)}s`);
+  await sleep(3000);
+  return { ok: job.status === 'waiting', job, out: job.out };
+}
 
-async function startSignin(slot) {
+// 页面点「登录」：
+//   1) 有未过期的码 → 直接复用
+//   2) 会话仍可用 → 不扫码，直接返回已是登录状态
+//   3) 会话不可用 → signout 清残留 → 取码 → 挂 verify 等扫码
+//   4) 币安侧还在冷却 → 返回剩余秒数，到点自动出码
+async function startSignin(slot, opts = {}) {
   const prev = signinJobs.get(slot);
   if (prev && prev.status === 'waiting' && prev.expireAt > Date.now() + 20000) {
+    log(`slot${slot} 复用未过期的码 ${prev.pairingCode}`);
     return { ok: true, slot, urlForWeb: prev.urlForWeb, pairingCode: prev.pairingCode,
-             expireAt: prev.expireAt, status: 'waiting', reused: true };   // 复用同一张码，避免作废/限流
+             expireAt: prev.expireAt, status: 'waiting', reused: true };
   }
-  if (prev?.child) { try { prev.child.kill(); } catch {} }
-  signinJobs.delete(slot);
 
-  let last = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    if (attempt === 2) await resetLoginFlow(slot);   // 第二次机会：先把卡住的登录流程清掉
-    const link = await signinLink(slot);
-    if (!link.ok) return link;
-    const job = { slot, qrCodeId: link.qrCodeId, urlForWeb: link.urlForWeb, pairingCode: link.pairingCode,
-                  expireAt: link.expireAt, status: 'waiting', startedAt: Date.now(), out: '' };
-    signinJobs.set(slot, job);
-    startVerify(slot, job);
-    await sleep(3000);                       // 等 3 秒看 verify 是否被服务端直接拒掉
-    if (job.status === 'waiting') {          // 正常：verify 正在等扫码
-      return { ok: true, slot, urlForWeb: job.urlForWeb, pairingCode: job.pairingCode,
-               expireAt: job.expireAt, status: job.status, attempt };
+  // 任何路径都要先查会话：force 只跳过"复用旧码"和"冷却"，绝不跳过登录态检查，
+  // 否则自动重试会对刚登录成功的钱包再 signout 一次，把用户踢下线。
+  {
+    const st = await sessionState(slot);
+    if (st.ok) {
+      const stale = signinJobs.get(slot);
+      if (stale && stale.status === 'waiting') { stale.status = 'success'; stale.endedAt = Date.now(); }
+      return { ok: true, slot, already: true, status: 'connected', address: st.addr };
     }
-    last = job;
-    if (!/AUTH_REJECTED|does not exist or expired/i.test(job.out || '')) break;   // 不是旧流程未清的锅就别重试
-    try { job.child?.kill(); } catch {}
-    signinJobs.delete(slot);
-    await sleep(2000);
   }
-  return { ok: false, slot, error: last?.status || 'unknown', out: (last?.out || '').slice(0, 300),
-           urlForWeb: last?.urlForWeb, pairingCode: last?.pairingCode };
+
+  if (Date.now() < poisonUntil) {
+    const waitSeconds = Math.ceil((poisonUntil - Date.now()) / 1000);
+    log(`slot${slot} 冷却中，还差 ${waitSeconds}s，稍后自动出码`);
+    if (!retryTimer) {
+      retryTimer = setTimeout(async () => {
+        retryTimer = null;
+        try { await startSignin(slot, { force: true }); } catch (e) { log('自动重试失败', e.message); }
+      }, (poisonUntil - Date.now()) + 1500);
+      retryTimer.unref?.();
+    }
+    return { ok: false, slot, error: 'cooling', waitSeconds,
+             hint: '币安侧上一轮登录流程还没过期，到点会自动出码，先别重复点' };
+  }
+
+  log(`slot${slot} 开始取码（先 signout 清残留流程）`);
+  await bawExec(slot, ['--json', 'auth', 'signout'], 25000);
+  await sleep(3000);
+  const r = await issueCode(slot);
+  if (r.ok) {
+    const j = r.job;
+    return { ok: true, slot, urlForWeb: j.urlForWeb, pairingCode: j.pairingCode,
+             expireAt: j.expireAt, status: 'waiting' };
+  }
+  const rejected = /AUTH_REJECTED|does not exist or expired/i.test(r.out || '');
+  if (rejected && !retryTimer) {
+    const waitSeconds = Math.max(5, Math.ceil((poisonUntil - Date.now()) / 1000));
+    retryTimer = setTimeout(async () => {
+      retryTimer = null;
+      try { await startSignin(slot, { force: true }); } catch (e) { log('自动重试失败', e.message); }
+    }, (poisonUntil - Date.now()) + 1500);
+    retryTimer.unref?.();
+    return { ok: false, slot, error: 'cooling', waitSeconds,
+             hint: '币安侧上一轮登录流程还没过期，到点会自动出码' };
+  }
+  return { ok: false, slot, error: 'failed', out: (r.out || '').slice(0, 300) };
 }
 
 function signinState() {
