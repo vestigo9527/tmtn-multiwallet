@@ -228,12 +228,9 @@ function jobPill(w) {
   }
   if (j && j.status === 'success') return '<span class="pill on">登录成功</span>';
   if (j && j.status === 'expired') return '<span class="pill warn">二维码过期</span>';
-  if (j && (j.status === 'rejected' || j.status === 'failed')) {
-    const cd = Math.round(((state.cooldownUntil || 0) - Date.now()) / 1000);
-    return `<span class="pill off">币安冷却${cd > 0 ? ' ' + cd + 's' : ''}</span>`;
-  }
-  const cd = Math.round(((state.cooldownUntil || 0) - Date.now()) / 1000);
-  if (cd > 0) return `<span class="pill off">冷却 ${cd}s</span>`;
+  if (j && j.status === 'rejected') return '<span class="pill warn">准备中…自动换码</span>';
+  if (j && j.status === 'failed') return '<span class="pill off">点登录再试</span>';
+  if (state.preparing) return `<span class="pill warn">二维码准备中 ${state.preparing.waitSeconds}s</span>`;
   return '';
 }
 function card(w) {
@@ -354,20 +351,20 @@ document.addEventListener('click', async (e) => {
       toast(`钱包 ${slot} 会话有效，无需重新扫码\n${r.address || ''}`, 'ok');
       return load(true);
     }
-    if (!r.ok && r.error === 'cooling') {
-      toast(`币安侧上一轮登录流程还没过期，约 ${r.waitSeconds} 秒后自动出码\n到点后卡片上会出现「等扫码」，点它打开二维码`, 'warn');
+    if (!r.ok && r.error === 'preparing') {
+      toast(`刚退出登录，币安侧需要一点时间才允许重新登录\n二维码约 ${r.waitSeconds} 秒后自动出现，不用你点`, 'warn');
       await load(true);
-      // 等自动出码
-      const deadline = Date.now() + (r.waitSeconds + 30) * 1000;
+      const deadline = Date.now() + ((r.waitSeconds || 60) + 60) * 1000;
       while (Date.now() < deadline) {
         await new Promise((res) => setTimeout(res, 3000));
         await load(true);
         const j = state.signin && state.signin[slot];
         if (j && j.status === 'waiting') { toast(`二维码已生成，配对码 ${j.pairingCode}，点卡片上的「等扫码」打开`, 'ok'); break; }
+        if (j && j.status === 'success') { toast('已登录', 'ok'); break; }
       }
       return;
     }
-    if (!r.ok) return toast('取登录链接失败：' + (r.error || r.out || ''), 'bad');
+    if (!r.ok) return toast('取登录链接失败：' + (r.hint || r.error || r.out || ''), 'bad');
     const mins = Math.max(1, Math.round((r.expireAt - Date.now()) / 60000));
     toast(`配对码 ${r.pairingCode}（${mins} 分钟内有效）\n扫码确认后会立刻变成「已登录」`, 'ok');
     window.open(r.urlForWeb, '_blank');

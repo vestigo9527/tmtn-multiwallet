@@ -102,7 +102,8 @@ async function buildState() {
   }));
   const maxSlot = Math.max(...wallets.map((w) => w.slot));
   return { tmtn: TMTN, port: PORT, wallets, nextSlot: maxSlot + 1, signin: signinState(),
-           cooldownUntil: Date.now() < poisonUntil ? poisonUntil : 0, at: Date.now() };
+           preparing: retryAt ? { slot: retrySlot, at: retryAt, waitSeconds: Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)) } : null,
+           at: Date.now() };
 }
 
 // ---------- 写操作 ----------
@@ -229,14 +230,28 @@ async function sessionState(slot) {
 
 // ---------- 扫码登录作业 ----------
 const signinJobs = new Map();
-// 币安侧一张码被作废/被拒后，同一设备在它的 5 分钟窗口内再取码会被一路 AUTH_REJECTED。
-// 记下"最早可再试的时间"，到点自动出码，避免用户反复点、越点越死。
-let poisonUntil = 0;
+// 手机退出登录之后，币安侧会话切换有传播延迟：紧接着取的第一张码必然被判
+// AUTH_REJECTED（"QR code does not exist or expired"），隔 1~3 分钟的下一次就正常。
+// 这不是用户操作错误，所以不提示"冷却"、不让用户等待——首张被拒就静默 60 秒后
+// 自动换新码，连续 MAX_ATTEMPTS 次都失败才如实报错。
+const RETRY_DELAY_MS = 60000;
+const MAX_ATTEMPTS = 3;
+let attempts = 0;
 let retryTimer = null;
-let failStreak = 0;
-const backoffMs = () => (failStreak <= 1
-  ? 90000
-  : Math.min(20, 5 * Math.pow(2, Math.max(0, failStreak - 2))) * 60000);
+let retryAt = 0;
+let retrySlot = 0;
+
+function scheduleRetry(slot) {
+  if (retryTimer) return;
+  retrySlot = slot;
+  retryAt = Date.now() + RETRY_DELAY_MS;
+  log(`slot${slot} 首张码被币安判无效（第 ${attempts} 次，属预期），${RETRY_DELAY_MS / 1000} 秒后自动换新码`);
+  retryTimer = setTimeout(async () => {
+    retryTimer = null; retryAt = 0;
+    try { await startSignin(slot, { retry: true }); } catch (e) { log('静默重试失败', e.message); }
+  }, RETRY_DELAY_MS);
+  retryTimer.unref?.();
+}
 
 function verifyArgs(slot, qrCodeId) {
   return slot === 1
@@ -256,7 +271,7 @@ function startVerify(slot, job) {
   child.on('close', (code, sig) => {
     job.out = buf.trim().slice(-800) || `(无输出 code=${code} sig=${sig})`;
     if (/"status"\s*:\s*"SUCCESS"/.test(buf)) {
-      job.status = 'success'; poisonUntil = 0; failStreak = 0;
+      job.status = 'success'; attempts = 0; retryAt = 0;
       log(`slot${slot} 登录成功`);
     } else if (job.status === 'waiting' && /NETWORK_ERROR|socket disconnected|ECONNRESET|ETIMEDOUT/i.test(buf)) {
       job.retries = (job.retries || 0) + 1;         // 网络抖动：同一张码重挂，别重新取码
@@ -268,9 +283,9 @@ function startVerify(slot, job) {
       job.status = 'failed';
     } else if (/AUTH_REJECTED|does not exist or expired/i.test(buf)) {
       job.status = 'rejected';
-      failStreak += 1;
-      poisonUntil = Math.max(poisonUntil, Date.now() + backoffMs());
-      log(`slot${slot} 被币安判无效（连续第 ${failStreak} 次），冷却 ${Math.round(backoffMs() / 60000)} 分钟，到 ${new Date(poisonUntil).toLocaleTimeString('zh-CN')}`);
+      attempts += 1;
+      if (attempts < MAX_ATTEMPTS) scheduleRetry(slot);
+      else log(`slot${slot} 连续 ${attempts} 张码都被判无效，停下来等用户再点`);
     } else if (/EXPIRED|FAILED|CANCELED|DECLINED/i.test(buf)) {
       job.status = 'failed'; log(`slot${slot} 登录失败`, buf.slice(0, 120));
     } else if (job.status === 'waiting') {
@@ -320,18 +335,10 @@ async function startSignin(slot, opts = {}) {
     }
   }
 
-  if (Date.now() < poisonUntil) {
-    const waitSeconds = Math.ceil((poisonUntil - Date.now()) / 1000);
-    log(`slot${slot} 冷却中，还差 ${waitSeconds}s，稍后自动出码`);
-    if (!retryTimer) {
-      retryTimer = setTimeout(async () => {
-        retryTimer = null;
-        try { await startSignin(slot, { force: true }); } catch (e) { log('自动重试失败', e.message); }
-      }, (poisonUntil - Date.now()) + 1500);
-      retryTimer.unref?.();
-    }
-    return { ok: false, slot, error: 'cooling', waitSeconds,
-             hint: '币安侧上一轮登录流程还没过期，到点会自动出码，先别重复点' };
+  if (retryAt) {   // 已有一轮静默重试在排队，别叠加
+    return { ok: false, slot, error: 'preparing',
+             waitSeconds: Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)),
+             hint: '二维码正在准备，到点自动出现' };
   }
 
   log(`slot${slot} 开始取码（先 signout 清残留流程）`);
@@ -344,17 +351,13 @@ async function startSignin(slot, opts = {}) {
              expireAt: j.expireAt, status: 'waiting' };
   }
   const rejected = /AUTH_REJECTED|does not exist or expired/i.test(r.out || '');
-  if (rejected && !retryTimer) {
-    const waitSeconds = Math.max(5, Math.ceil((poisonUntil - Date.now()) / 1000));
-    retryTimer = setTimeout(async () => {
-      retryTimer = null;
-      try { await startSignin(slot, { force: true }); } catch (e) { log('自动重试失败', e.message); }
-    }, (poisonUntil - Date.now()) + 1500);
-    retryTimer.unref?.();
-    return { ok: false, slot, error: 'cooling', waitSeconds,
-             hint: '币安侧上一轮登录流程还没过期，到点会自动出码' };
+  if (rejected && retryAt) {   // 首张码被拒是预期，已排好静默重试
+    return { ok: false, slot, error: 'preparing',
+             waitSeconds: Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)),
+             hint: '刚退出登录，币安侧要几十秒才允许重新登录；二维码会自动出现' };
   }
-  return { ok: false, slot, error: 'failed', out: (r.out || '').slice(0, 300) };
+  return { ok: false, slot, error: 'failed', out: (r.out || '').slice(0, 300),
+           hint: '连续多张码都被币安判无效，稍等一会儿再点一次' };
 }
 
 function signinState() {
