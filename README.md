@@ -345,7 +345,7 @@ curl -s -X POST http://127.0.0.1:8788/api/order -H 'content-type: application/js
 scripts/
 ├─ add-wallet.sh     建/改单个钱包容器（MAC、端口、代理、环境变量）
 ├─ wallets.sh        总控：status / signin / lock / live / quote / peers / label / add
-├─ signin-all.sh     批量扫码：一次开多个登录链接，过期自动重开，生成本地登录页
+├─ signin-all.sh     批量出码：只给未登录的钱包拉起 qr-session.sh，已登录的跳过
 ├─ relogin.sh        单个钱包重新登录（查会话 → signout → 取码 → 前台挂 verify，绝不 kill）
 ├─ qr-session.sh     页面「登录」调用的独立会话：signout → 取码 → 常驻 verify，结果写 wallets/signin/N.json
 ├─ labels.sh         钱包备注读写（wallets/labels.env）
