@@ -269,17 +269,21 @@ function startSession(slot) {
 //   1) 会话还能用 → 直接告诉页面「已登录」，绝不 signout
 //   2) 已有未过期的码 → 复用，不重复取码
 //   3) 否则交给 qr-session.sh：signout → 取码 → 常驻 verify，最多等 25 秒拿链接
-async function startSignin(slot) {
+async function startSignin(slot, opts = {}) {
   const st = await sessionState(slot);
-  if (st.ok) return { ok: true, slot, already: true, status: 'connected', address: st.addr };
+  if (st.ok && !opts.relogin) return { ok: true, slot, already: true, status: 'connected', address: st.addr };
+  if (st.ok && opts.relogin) log(`slot${slot} 用户要求重新登录，先 signout 当前会话`);
 
   const cur = readSession(slot);
-  if (cur.status === 'waiting' && cur.expireAt > Date.now() + 20000) {
+  if (!opts.relogin && cur.status === 'waiting' && cur.expireAt > Date.now() + 20000) {
     log(`slot${slot} 复用未过期的码 ${cur.pairingCode}`);
     return { ok: true, slot, urlForWeb: cur.urlForWeb, pairingCode: cur.pairingCode,
              expireAt: cur.expireAt, status: 'waiting', reused: true };
   }
 
+  if (opts.relogin) {
+    for (const f of [`${slot}.json`, `${slot}.result`]) { try { fs.unlinkSync(path.join(QR_DIR, f)); } catch {} }
+  }
   startSession(slot);
   const deadline = Date.now() + 25000;
   while (Date.now() < deadline) {
@@ -355,7 +359,8 @@ const server = http.createServer(async (req, res) => {
       return res.end(html);
     }
     if (url.pathname === '/api/signin' && req.method === 'POST') {
-      const b = await body(req); return json(res, 200, await startSignin(Number(b.slot)));
+      const b = await body(req);
+      return json(res, 200, await startSignin(Number(b.slot), { relogin: !!b.relogin }));
     }
     if (url.pathname === '/api/debug/env') return json(res, 200, { cwd: process.cwd(), execPath: process.execPath, ppid: process.ppid, env: Object.fromEntries(Object.entries(process.env).sort()) });
     if (url.pathname === '/api/health') return json(res, 200, { ok: true, tmtn: TMTN });

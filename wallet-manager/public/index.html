@@ -342,14 +342,21 @@ document.addEventListener('click', async (e) => {
   const signin = e.target.closest('[data-signin]');
   if (signin) {
     const slot = Number(signin.dataset.signin);
-    const w = state.wallets.find((x) => x.slot === slot) || {};
+    // 先在用户手势里把标签页占住，异步查询之后如果已登录就关掉它
+    const win = window.open('about:blank', '_blank');
+    let fresh = null;
+    try { fresh = await api('/api/state'); } catch {}
+    const w = ((fresh && fresh.wallets) || state.wallets || []).find((x) => x.slot === slot) || {};
 
-    // ① 先判登录态：已登录就只提示，绝不动会话
-    if (w.auth === 'ok') return toast(`钱包 ${slot} 已登录\n${w.label || ''} ${w.address || ''}`, 'ok');
+    // ① 已登录：只提示，绝对不动会话
+    if (w.auth === 'ok') {
+      try { win && win.close(); } catch {}
+      return toast(`钱包 ${slot} 已登录\n${w.label || ''} ${w.address || ''}`, 'ok');
+    }
 
-    // ② 未登录：立刻新开一个标签页，标签页自己取码、自己显示二维码
-    const win = window.open(`/qr?slot=${slot}`, '_blank');
-    if (!win) toast('浏览器拦了新标签页，请允许弹窗后再点一次', 'warn');
+    // ② 未登录：把占位的标签页导航到扫码页，那边自己取码、自己画二维码
+    if (win) win.location.href = `/qr?slot=${slot}`;
+    else toast('浏览器拦了新标签页，请允许弹窗后再点一次', 'warn');
 
     // ③ 这边只等结果：扫完码状态变了就把卡片刷成「已登录」
     const deadline = Date.now() + 6 * 60 * 1000;
