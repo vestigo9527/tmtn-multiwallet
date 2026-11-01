@@ -1,0 +1,30 @@
+# 历史数据缓存（可选）：MySQL + Redis，端口只开在本机 127.0.0.1。
+#   启动：TMTN_DB_PASSWORD=换一个密码 docker compose -f docker/cache-compose.yml up -d
+#   然后在 .env 里填：
+#     MYSQL_URL=mysql://tmtn:<同一个密码>@127.0.0.1:13306/tmtn
+#     REDIS_URL=redis://127.0.0.1:16379
+# 数据在 docker 卷 tmtn-mysql 里（删掉也没关系，只是缓存，会从链上 / 接口重新补）
+services:
+  tmtn-mysql:
+    image: mysql:8.4
+    container_name: tmtn-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: tmtn
+      MYSQL_USER: tmtn
+      MYSQL_PASSWORD: ${TMTN_DB_PASSWORD:?先设置 TMTN_DB_PASSWORD}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    command: ["--innodb-buffer-pool-size=256M", "--max-connections=50", "--skip-name-resolve"]
+    ports:
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - tmtn-mysql:/var/lib/mysql
+  tmtn-redis:
+    image: redis:7.4-alpine
+    container_name: tmtn-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:16379:6379"
+volumes:
+  tmtn-mysql:
