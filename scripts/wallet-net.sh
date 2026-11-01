@@ -43,7 +43,10 @@ tunnel_up() {
   if vm_ssh "ss -ltn | grep -q ' 0.0.0.0:$OPEN_PORT'" 2>/dev/null; then
     ok "虚拟机 socat 已在（0.0.0.0:${OPEN_PORT}）"
   else
-    vm_ssh "pkill -f 'socat TCP-LISTEN:$OPEN_PORT' 2>/dev/null; nohup socat TCP-LISTEN:$OPEN_PORT,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:$VM_PORT >/tmp/wallet-net-socat.log 2>&1 & sleep 1; ss -ltn | grep ' 0.0.0.0:$OPEN_PORT'" >/dev/null 2>&1
+    # 注意：这里绝不能用 pkill -f 'socat TCP-LISTEN:…' —— 命令串本身就含这段文字，
+    # pkill 会连自己这条 ssh 会话一起杀掉，结果 socat 永远起不来（2026-11-01 踩过）。
+    # 改成按监听端口找 pid 再 kill，并且 setsid + </dev/null 彻底脱离终端。
+    vm_ssh "for P in \$(ss -ltnp 2>/dev/null | grep ':$OPEN_PORT' | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do kill \$P 2>/dev/null; done; sleep 0.5; setsid nohup socat TCP-LISTEN:$OPEN_PORT,fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:$VM_PORT >/tmp/wallet-net-socat.log 2>&1 </dev/null & sleep 1.5; ss -ltn | grep ' 0.0.0.0:$OPEN_PORT'" >/dev/null 2>&1
     vm_ssh "ss -ltn | grep -q ' 0.0.0.0:$OPEN_PORT'" 2>/dev/null && ok "虚拟机 socat 已建立（0.0.0.0:$OPEN_PORT → 127.0.0.1:${VM_PORT}）" \
       || die "虚拟机里 socat 没起来"
   fi
