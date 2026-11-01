@@ -78,6 +78,7 @@ printf '%s' "$vout" > "$UIDIR/$N.verify.log"
 if printf '%s' "$vout" | grep -q '"SUCCESS"'; then
   say "✓ 登录成功"
   printf '{"status":"SUCCESS","raw":"ok","at":%s}\n' "$(date +%s)" > "$RES"
+  rm -f "$JSON"   # 用完就把码删掉：否则手机端退出登录后，页面会把这张已消费的旧码当活码显示出来
 else
   say "✗ verify 结束：$(printf '%s' "$vout" | tr -d '\n' | cut -c1-160)"
   printf '{"status":"FAILED","raw":%s,"at":%s}\n' \
