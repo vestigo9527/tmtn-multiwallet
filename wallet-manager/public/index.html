@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>钱包备注管理台</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141822; --panel2:#1b2130; --line:#252c3d;
+    --txt:#e8ecf5; --dim:#8b95ab; --accent:#f0b90b; --ok:#37d67a; --bad:#ff6b6b; --blue:#5aa9ff;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#1a2130 0%,var(--bg) 60%);
+       color:var(--txt);font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;
+       -webkit-font-smoothing:antialiased;min-height:100vh}
+  header{position:sticky;top:0;z-index:10;backdrop-filter:blur(14px);background:rgba(11,13,18,.82);
+         border-bottom:1px solid var(--line)}
+  .bar{max-width:1180px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:16px;letter-spacing:.3px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 12px var(--ok)}
+  .dot.off{background:var(--bad);box-shadow:0 0 12px var(--bad)}
+  .tabs{display:flex;gap:4px;margin-left:6px;background:var(--panel);padding:3px;border-radius:11px;border:1px solid var(--line)}
+  .tabs button{background:none;border:0;color:var(--dim);padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600}
+  .tabs button.on{background:var(--panel2);color:var(--txt);box-shadow:0 1px 6px rgba(0,0,0,.35)}
+  .spacer{flex:1}
+  button.act{background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:7px 13px;border-radius:9px;
+             cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+  button.act:hover{background:var(--panel2);border-color:#3a4459}
+  button.act.primary{background:var(--accent);border-color:var(--accent);color:#1a1400}
+  button.act.primary:hover{filter:brightness(1.08)}
+  button.act:disabled{opacity:.45;cursor:not-allowed}
+  main{max-width:1180px;margin:0 auto;padding:22px 20px 80px}
+  .hint{color:var(--dim);font-size:13px;margin:0 0 18px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
+  .card{background:linear-gradient(180deg,var(--panel) 0%,#11151d 100%);border:1px solid var(--line);border-radius:var(--radius);
+        padding:16px;position:relative;transition:.15s}
+  .card:hover{border-color:#33405a;transform:translateY(-1px)}
+  .card.dirty{border-color:var(--accent);box-shadow:0 0 0 1px rgba(240,185,11,.25),0 8px 24px -12px rgba(240,185,11,.4)}
+  .chead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .slot{width:30px;height:30px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+        display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--accent);flex:none}
+  .name{font-size:15px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;border:1px solid;white-space:nowrap}
+  .pill.on{color:var(--ok);border-color:rgba(55,214,122,.4);background:rgba(55,214,122,.1)}
+  .pill.off{color:var(--bad);border-color:rgba(255,107,107,.35);background:rgba(255,107,107,.09)}
+  .pill.warn{color:var(--accent);border-color:rgba(240,185,11,.35);background:rgba(240,185,11,.09)}
+  .labelrow{display:flex;gap:8px;margin:4px 0 12px}
+  input[type=text]{flex:1;background:#0d1017;border:1px solid var(--line);color:var(--txt);border-radius:9px;
+        padding:9px 12px;font-size:14px;font-weight:600;outline:none;transition:.15s}
+  input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(240,185,11,.12)}
+  .kv{display:grid;grid-template-columns:64px 1fr;gap:4px 10px;font-size:12.5px;margin-bottom:12px}
+  .kv dt{color:var(--dim)}
+  .kv dd{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kv dd.plain{font-family:inherit;font-size:12.5px}
+  .addr{cursor:pointer;border-bottom:1px dashed #38415a}
+  .addr:hover{color:var(--blue)}
+  .foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .toggle{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim);user-select:none;cursor:pointer}
+  .sw{width:34px;height:19px;border-radius:20px;background:#2a3244;position:relative;transition:.18s}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#7e879c;transition:.18s}
+  .toggle.on .sw{background:rgba(55,214,122,.28)}
+  .toggle.on .sw::after{left:17px;background:var(--ok)}
+  .toggle.on{color:var(--ok)}
+  .spacer2{flex:1}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;
+         background:#1d2433;border:1px solid var(--line);color:var(--txt);padding:11px 18px;border-radius:11px;
+         font-size:13px;max-width:70vw;box-shadow:0 16px 40px -18px #000;transition:.25s;z-index:99;white-space:pre-wrap}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.ok{border-color:rgba(55,214,122,.45)} .toast.bad{border-color:rgba(255,107,107,.45)}
+  /* 原理页 */
+  .doc{max-width:860px;line-height:1.85;font-size:14.5px}
+  .doc h2{font-size:17px;margin:30px 0 10px;color:var(--accent)}
+  .doc h2:first-child{margin-top:0}
+  .doc p{color:#c6cede;margin:8px 0}
+  .doc code{background:#0d1017;border:1px solid var(--line);padding:1px 6px;border-radius:5px;font-size:12.5px;color:#9fd1ff}
+  .doc pre{background:#0a0d13;border:1px solid var(--line);border-radius:11px;padding:14px 16px;overflow:auto;font-size:12.5px;color:#b9c6dd}
+  .doc ol,.doc ul{color:#c6cede;padding-left:22px}
+  .doc li{margin:5px 0}
+  .doc table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+  .doc th,.doc td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+  .doc th{background:var(--panel2);color:var(--dim);font-weight:600}
+  .hidden{display:none!important}
+  .loading{color:var(--dim);padding:40px;text-align:center}
+  /* 弹窗 */
+  .mask{position:fixed;inset:0;background:rgba(5,7,11,.72);backdrop-filter:blur(6px);z-index:60;
+        display:flex;align-items:center;justify-content:center;padding:20px}
+  .modal{width:440px;max-width:100%;background:linear-gradient(180deg,#171c27,#11151d);border:1px solid var(--line);
+         border-radius:16px;padding:22px;box-shadow:0 30px 80px -30px #000}
+  .modal h3{margin:0 0 4px;font-size:17px}
+  .modal .sub{color:var(--dim);font-size:12.5px;margin:0 0 18px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12.5px;color:var(--dim);margin-bottom:6px;font-weight:600}
+  .field input[type=number]{width:100%;background:#0d1017;border:1px solid var(--line);color:var(--txt);
+        border-radius:9px;padding:9px 12px;font-size:14px;outline:none}
+  .field input[type=number]:focus{border-color:var(--accent)}
+  .chk{display:flex;align-items:center;gap:8px;font-size:13px;color:#c6cede;margin:9px 0;cursor:pointer;user-select:none}
+  .chk input{accent-color:var(--accent);width:15px;height:15px}
+  .modal .mfoot{display:flex;gap:9px;justify-content:flex-end;margin-top:20px}
+  .log{margin-top:14px;background:#0a0d13;border:1px solid var(--line);border-radius:10px;padding:11px 13px;
+       font:12px/1.6 ui-monospace,Menlo,monospace;color:#a8b6cf;max-height:190px;overflow:auto;white-space:pre-wrap}
+  .okline{color:var(--ok);font-weight:700}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(240,185,11,.25);border-top-color:var(--accent);
+        border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:7px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="logo"><span class="dot" id="healthDot"></span>钱包备注管理台</div>
+    <div class="tabs">
+      <button data-tab="wallets" class="on">钱包 / 备注</button>
+      <button data-tab="how">多钱包原理</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="act primary" id="btnAdd">＋ 新建钱包</button>
+    <button class="act" id="btnLock">锁定地址</button>
+    <button class="act" id="btnRefresh">刷新状态</button>
+    <button class="act" id="btnRestart">重启钱包 1 后端</button>
+  </div>
+</header>
+
+<main>
+  <section id="tab-wallets">
+    <p class="hint">改备注后按 Enter 或点「保存」；钱包 2–7 会自动重建容器（登录不丢），钱包 1 需要重启主后端才在页面上显示。</p>
+    <div id="grid" class="grid"><div class="loading">读取中…</div></div>
+  </section>
+
+  <section id="tab-how" class="hidden">
+    <div class="doc">
+      <h2>一句话结论</h2>
+      <p>币安 Agentic Wallet 用<b>网卡 MAC</b> 认设备：同一块网卡只能挂一个币安账号的会话，登第二个会把第一个挤掉。TMTN 的多钱包方案就是「一个钱包 = 一个独立 MAC = 一个独立 <code>~/.baw</code> 登录目录」。</p>
+
+      <h2>三层隔离怎么搭</h2>
+      <table>
+        <tr><th>层</th><th>做法</th><th>目的</th></tr>
+        <tr><td>设备身份</td><td>容器用 <code>mac_address: 02:xx:…</code> 固定假 MAC</td><td>让 <code>baw</code> 认为是不同机器，会话互不覆盖</td></tr>
+        <tr><td>登录态</td><td><code>-v ./wallets/walletN/baw:/root/.baw</code></td><td>每个钱包一份独立会话文件，容器重建也不丢</td></tr>
+        <tr><td>服务入口</td><td><code>-p 127.0.0.1:(8787+N):8787</code></td><td>一个钱包一个端口，全部只绑本机</td></tr>
+      </table>
+
+      <h2>钱包 1 为什么跑本机</h2>
+      <p>本机网卡已经是「一台设备」，正好给第一个账号用，省一个容器。它直接读根 <code>.env</code> 的 <code>WALLET_LABEL</code> / <code>WALLET_ADDRESS</code> / <code>LIVE_TRADE</code>。</p>
+
+      <h2>登录流程（扫码，5 分钟有效）</h2>
+      <pre># 钱包 1
+baw --json auth signin                         # 拿 urlForWeb + pairingCode
+baw --json auth verify --qrCodeId &lt;id&gt;         # 轮询到 SUCCESS
+
+# 钱包 N（N≥2）
+docker exec tmtn-walletN baw --json auth signin
+docker exec tmtn-walletN baw --json auth verify --qrCodeId &lt;id&gt;</pre>
+      <p>卡片上的「登录」按钮做的就是这件事：它把 <code>urlForWeb</code> 和配对码取出来给你，浏览器打开链接就是二维码页，用对应币安账号的 App 扫。</p>
+
+      <h2>地址锁定（防扫错账号）</h2>
+      <p>每个钱包登录后把地址写死：钱包 1 进 <code>.env</code> 的 <code>WALLET_ADDRESS</code>，2–7 进 <code>wallets/walletN/address</code>。后端启动时比对实际地址与锁定值，不一致就拒绝下单——这样「不小心用 A 号的钱包下了 B 号的单」不会发生。</p>
+
+      <h2>备注存在哪</h2>
+      <p><code>wallets/labels.env</code>，一行一个 <code>WALLET_LABEL_N=备注</code>。它被三个地方同时消费：容器环境变量 <code>WALLET_LABEL</code>、主后端的 <code>WALLET_PEERS</code> 列表、页面标题。所以改一次，列表、页头、下单选择里全变。</p>
+
+      <h2>容器要出网（国内网络必须做）</h2>
+      <p>Clash 只监听 <code>127.0.0.1:7890</code>，容器直连会被墙。链路是：</p>
+      <pre>容器 → 172.31.0.1:17891（VM socat）→ 127.0.0.1:17890（ssh -R 反向隧道）→ 本机 Clash 7890</pre>
+      <p>容器里注入 <code>HTTP_PROXY/HTTPS_PROXY/ALL_PROXY</code> + <code>NODE_USE_ENV_PROXY=1</code>（Node 的 fetch 才认这三个变量）。重启机器后先跑 <code>scripts/wallet-net.sh up</code>。</p>
+
+      <h2>加第 N 个钱包</h2>
+      <pre>scripts/wallets.sh add 8 新钱包        # 端口 8795、独立 MAC、独立 baw 目录、写好备注
+scripts/wallets.sh signin 8            # 扫码
+scripts/wallets.sh lock                # 锁地址</pre>
+      <p>核心配置全在 <code>wallets/walletN/docker-compose.yml</code>，由 <code>scripts/add-wallet.sh</code> 生成，改 MAC 等于换设备（会要求重新登录），所以 MAC 定下别动。</p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<!-- 新建钱包 -->
+<div class="mask hidden" id="addMask">
+  <div class="modal">
+    <h3>新建钱包</h3>
+    <p class="sub">每个钱包 = 一个独立容器（独立 MAC + 独立登录目录），端口自动 = 8787 + 序号，只绑本机。</p>
+    <div class="field">
+      <label>序号</label>
+      <input type="number" id="addSlot" min="2" max="30" step="1">
+    </div>
+    <div class="field">
+      <label>备注（起个认得出来的名字）</label>
+      <input type="text" id="addLabel" maxlength="40" placeholder="比如 第 8 号-打新">
+    </div>
+    <label class="chk"><input type="checkbox" id="addLive"> 建好就直接真实下单（默认只报价，建议先别勾）</label>
+    <label class="chk"><input type="checkbox" id="addRestart" checked> 建完自动重启钱包 1 主后端（让钱包列表生效）</label>
+    <div id="addLog" class="log hidden"></div>
+    <div class="mfoot">
+      <button class="act" id="addCancel">取消</button>
+      <button class="act primary" id="addGo">创建</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let state = { wallets: [] };
+let editing = {};   // slot -> 未保存的备注
+
+function toast(msg, kind = '') {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + kind;
+  clearTimeout(t._h);
+  t._h = setTimeout(() => { t.className = 'toast ' + kind; }, 3200);
+}
+async function api(path, payload) {
+  const res = await fetch(path, payload ? {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+  } : {});
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { return { ok: false, error: text.slice(0, 300) }; }
+}
+const short = (a) => a ? a.slice(0, 6) + '…' + a.slice(-4) : '—';
+
+function jobPill(w) {
+  const j = state.signin && state.signin[w.slot];
+  if (!j) return '';
+  if (j.status === 'waiting') return '<span class="pill warn">等扫码</span>';
+  if (j.status === 'success') return '<span class="pill on">登录成功</span>';
+  if (j.status === 'expired') return '<span class="pill warn">二维码过期</span>';
+  return '<span class="pill off">登录失败</span>';
+}
+function card(w) {
+  const authed = w.auth === 'ok' || w.auth === 'logged_in' || w.auth === 'CONNECTED';
+  const labelVal = editing[w.slot] !== undefined ? editing[w.slot] : w.label;
+  const dirty = editing[w.slot] !== undefined && editing[w.slot] !== w.label;
+  const el = document.createElement('div');
+  el.className = 'card' + (dirty ? ' dirty' : '');
+  el.innerHTML = `
+    <div class="chead">
+      <div class="slot">${w.slot}</div>
+      <div class="name" title="${esc(w.label)}">${esc(w.label)}</div>
+      <span class="pill ${w.up ? 'on' : 'off'}">${w.up ? '运行中' : '未运行'}</span>
+      <span class="pill ${authed ? 'on' : 'off'}">${authed ? '已登录' : '未登录'}</span>
+      ${jobPill(w)}
+    </div>
+    <div class="labelrow">
+      <input type="text" data-slot="${w.slot}" maxlength="40" value="${esc(labelVal)}" placeholder="给它起个名字，比如 主号-打新">
+      <button class="act primary" data-save="${w.slot}" ${dirty ? '' : 'disabled'}>保存</button>
+    </div>
+    <dl class="kv">
+      <dt>地址</dt><dd class="addr" data-copy="${esc(w.addressLive || w.address)}" title="点击复制">${esc(w.addressLive || w.address || '未锁定')}</dd>
+      <dt>端口</dt><dd class="plain"><a href="${w.url}" target="_blank" style="color:var(--blue)">${w.port} ↗</a> · ${esc(w.container)}</dd>
+      <dt>agentId</dt><dd>${esc(w.agentId || '—')}</dd>
+      <dt>MAC</dt><dd>${esc(w.mac || '真实网卡')}</dd>
+    </dl>
+    <div class="foot">
+      <label class="toggle ${w.live ? 'on' : ''}" data-live="${w.slot}">
+        <span class="sw"></span><span>${w.live ? '真实下单' : '只报价'}</span>
+      </label>
+      <div class="spacer2"></div>
+      <button class="act" data-signin="${w.slot}">登录</button>
+      <button class="act" data-open="${w.url}">打开</button>
+    </div>`;
+  return el;
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function render() {
+  const grid = $('#grid');
+  if (!state.wallets.length) { grid.innerHTML = '<div class="loading">还没读到钱包</div>'; return; }
+  grid.innerHTML = '';
+  state.wallets.forEach((w) => grid.appendChild(card(w)));
+  $('#healthDot').className = 'dot' + (state.wallets.some((w) => w.up) ? '' : ' off');
+}
+
+async function load(quiet) {
+  if (!quiet) $('#grid').innerHTML = '<div class="loading">读取中…</div>';
+  state = await api('/api/state');
+  // 丢弃已保存的编辑缓存
+  for (const s of Object.keys(editing)) {
+    const w = state.wallets.find((x) => String(x.slot) === String(s));
+    if (w && w.label === editing[s]) delete editing[s];
+  }
+  render();
+}
+
+document.addEventListener('input', (e) => {
+  const inp = e.target.closest('input[data-slot]');
+  if (!inp) return;
+  editing[inp.dataset.slot] = inp.value;
+  const c = inp.closest('.card');
+  const w = state.wallets.find((x) => String(x.slot) === inp.dataset.slot);
+  const dirty = inp.value !== w.label;
+  c.classList.toggle('dirty', dirty);
+  c.querySelector('[data-save]').disabled = !dirty;
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('input[data-slot]')) {
+    e.preventDefault();
+    e.target.closest('.card').querySelector('[data-save]').click();
+  }
+  if (e.key === 'Escape' && e.target.matches('input[data-slot]')) {
+    delete editing[e.target.dataset.slot];
+    render();
+  }
+});
+document.addEventListener('click', async (e) => {
+  const save = e.target.closest('[data-save]');
+  if (save) {
+    const slot = Number(save.dataset.save);
+    const val = editing[slot];
+    if (!val || !val.trim()) return toast('备注不能为空', 'bad');
+    save.disabled = true; save.textContent = '保存中…';
+    const r = await api('/api/label', { slot, label: val.trim() });
+    save.textContent = '保存';
+    if (!r.ok) { save.disabled = false; return toast('保存失败：\n' + (r.out || r.error || ''), 'bad'); }
+    delete editing[slot];
+    toast(`钱包 ${slot} 备注已改为「${val.trim()}」` + (r.needRestartMain ? '\n重启钱包 1 后端后页面上才会显示' : ''), 'ok');
+    if (r.needRestartMain) {
+      if (confirm('钱包 1 的备注已写入 .env，现在重启主后端让它生效？')) {
+        toast('重启中…');
+        const rr = await api('/api/restart-main', {});
+        toast(rr.ok ? '主后端已重启' : '重启失败：' + (rr.out || ''), rr.ok ? 'ok' : 'bad');
+      }
+    }
+    return load(true);
+  }
+  const live = e.target.closest('[data-live]');
+  if (live) {
+    const slot = Number(live.dataset.live);
+    const w = state.wallets.find((x) => x.slot === slot);
+    const next = !w.live;
+    if (next && !confirm(`钱包 ${slot}（${w.label}）切到「真实下单」？\n这会让它真的花钱买币。`)) return;
+    const r = await api('/api/live', { slot, live: next });
+    toast(r.ok ? `钱包 ${slot} → ${next ? '真实下单' : '只报价'}` + (r.needRestartMain ? '（重启后端生效）' : '') : '失败：' + (r.out || r.error), r.ok ? 'ok' : 'bad');
+    return load(true);
+  }
+  const signin = e.target.closest('[data-signin]');
+  if (signin) {
+    const slot = Number(signin.dataset.signin);
+    signin.disabled = true; signin.textContent = '取链接…';
+    const r = await api('/api/signin', { slot });
+    signin.disabled = false; signin.textContent = '登录';
+    if (!r.ok) return toast('取登录链接失败：' + (r.error || r.out || ''), 'bad');
+    const mins = Math.max(1, Math.round((r.expireAt - Date.now()) / 60000));
+    toast(`配对码 ${r.pairingCode}（${mins} 分钟内有效）\n扫码确认后会立刻变成「已登录」`, 'ok');
+    window.open(r.urlForWeb, '_blank');
+    load(true);
+
+    // 轮询作业状态：扫码确认后 verify 返回 SUCCESS
+    const deadline = Date.now() + 6 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 2500));
+      let st;
+      try { st = await api('/api/state'); } catch { continue; }
+      const j = st.signin && st.signin[slot];
+      if (!j) continue;
+      if (j.status === 'success') {
+        toast(`钱包 ${slot} 登录成功`, 'ok');
+        return load();
+      }
+      if (j.status === 'failed' || j.status === 'expired') {
+        toast(j.status === 'expired' ? `钱包 ${slot} 二维码过期，重新点「登录」` : `钱包 ${slot} 登录失败`, 'bad');
+        return load();
+      }
+    }
+    toast('等待超时，可重新点「登录」', 'bad');
+    return;
+  }
+  const open = e.target.closest('[data-open]');
+  if (open) return window.open(open.dataset.open, '_blank');
+  const copy = e.target.closest('[data-copy]');
+  if (copy && copy.dataset.copy) {
+    navigator.clipboard.writeText(copy.dataset.copy);
+    return toast('地址已复制', 'ok');
+  }
+});
+
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+  $('#tab-wallets').classList.toggle('hidden', b.dataset.tab !== 'wallets');
+  $('#tab-how').classList.toggle('hidden', b.dataset.tab !== 'how');
+}));
+$('#btnLock').addEventListener('click', async () => {
+  if (!confirm('把每个钱包当前登录的地址写死进配置（防扫错账号下错单）？')) return;
+  toast('锁定中…');
+  const r = await api('/api/lock', {});
+  toast(r.ok ? '地址已全部锁定' + (r.out ? '\n' + String(r.out).split('\n').slice(-3).join('\n') : '') : '锁定失败：' + (r.out || ''), r.ok ? 'ok' : 'bad');
+  load(true);
+});
+$('#btnRefresh').addEventListener('click', () => load());
+$('#btnRestart').addEventListener('click', async () => {
+  if (!confirm('重启钱包 1 的主后端（端口 8787）？')) return;
+  toast('重启中…');
+  const r = await api('/api/restart-main', {});
+  toast(r.ok ? '主后端已重启' : '重启失败：' + (r.out || ''), r.ok ? 'ok' : 'bad');
+  load(true);
+});
+
+load();
+setInterval(() => load(true), 20000);
+
+// ---------- 新建钱包 ----------
+const addMask = $('#addMask');
+function openAdd() {
+  $('#addSlot').value = state.nextSlot || '';
+  $('#addLabel').value = '';
+  $('#addLive').checked = false;
+  $('#addRestart').checked = true;
+  $('#addLog').classList.add('hidden');
+  $('#addLog').textContent = '';
+  $('#addGo').disabled = false;
+  $('#addGo').textContent = '创建';
+  addMask.classList.remove('hidden');
+  setTimeout(() => $('#addLabel').focus(), 60);
+}
+function closeAdd() { addMask.classList.add('hidden'); }
+$('#btnAdd').addEventListener('click', openAdd);
+$('#addCancel').addEventListener('click', closeAdd);
+addMask.addEventListener('click', (e) => { if (e.target === addMask) closeAdd(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !addMask.classList.contains('hidden')) closeAdd(); });
+
+$('#addGo').addEventListener('click', async () => {
+  const slot = Number($('#addSlot').value);
+  const label = $('#addLabel').value.trim();
+  if (!Number.isInteger(slot) || slot < 2) return toast('序号要从 2 开始', 'bad');
+  if (!label) return toast('给个备注名，方便以后认', 'bad');
+  const btn = $('#addGo');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>创建中…';
+  const log = $('#addLog');
+  log.classList.remove('hidden');
+  log.innerHTML = `正在建钱包 ${slot}（${label}）……\n端口 ${8787 + slot} · 容器 tmtn-wallet${slot} · 约 10–60 秒\n\n准备代理通道与容器…`;
+
+  const r = await api('/api/add', { slot, label, live: $('#addLive').checked, restart: $('#addRestart').checked });
+  btn.disabled = false;
+  btn.textContent = '创建';
+
+  if (!r.ok) {
+    log.innerHTML = `<span style="color:var(--bad)">✗ ${esc(r.error || '创建失败')}</span>\n\n${esc(r.out || '')}`;
+    return toast('创建失败：' + (r.error || ''), 'bad');
+  }
+  log.innerHTML = `<span class="okline">✓ 钱包 ${r.slot}「${esc(r.label)}」已就绪</span>\n端口 http://127.0.0.1:${r.port}`
+    + (r.restarted ? '\n主后端已重启，钱包列表已更新' : '\n记得手动重启主后端让列表生效')
+    + (r.signin ? `\n\n登录：配对码 ${esc(r.signin.pairingCode)}（5 分钟内有效）` : '')
+    + `\n\n${esc((r.out || '').split('\n').slice(-12).join('\n'))}`;
+  if (r.signin && r.signin.urlForWeb) {
+    const a = document.createElement('button');
+    a.className = 'act primary';
+    a.textContent = '打开登录二维码';
+    a.style.marginTop = '10px';
+    a.onclick = () => window.open(r.signin.urlForWeb, '_blank');
+    log.appendChild(document.createElement('div')).appendChild(a);
+  }
+  toast(`钱包 ${r.slot} 已建好，端口 ${r.port}`, 'ok');
+  load(true);
+});
+</script>
+</body>
+</html>
