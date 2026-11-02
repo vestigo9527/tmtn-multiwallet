@@ -351,7 +351,8 @@ scripts/
 ├─ labels.sh         钱包备注读写（wallets/labels.env）
 ├─ wallet-net.sh     容器出网通道（宿主 Clash ← ssh -R ← 虚拟机 socat → 容器）
 ├─ walletnet-watch.sh 通道守护：VM 起来后自动补 wallet-net.sh up（LaunchAgent 每 30 秒）
-└─ install-watch-agent.sh 装/卸上面那个 LaunchAgent（ai.tmtn.walletnet-watch）
+├─ install-watch-agent.sh 装/卸上面那个 LaunchAgent（ai.tmtn.walletnet-watch）
+└─ pause-all.sh      一键暂停/恢复全套服务（stop | start | status）
 
 wallet-manager/      图形化备注管理台（零依赖 Node 服务）
 ├─ server.mjs        API：列出钱包 / 改备注 / 切实盘 / 取登录链接 / 一键新建 / 锁地址
